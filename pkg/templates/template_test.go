@@ -6,26 +6,37 @@ import (
 	"path/filepath"
 	"testing"
 	"text/template"
+
+	"github.com/nvidia/k8s-launch-kit/pkg/clusterconfig"
 )
 
 func TestHostDeviceRdmaTemplate(t *testing.T) {
 	// Define test config matching l8k-config.yaml structure
-	config := Config{
-		NetworkOperator: NetworkOperatorConfig{
+	config := clusterconfig.ClusterConfig{
+		NetworkOperator: clusterconfig.NetworkOperatorConfig{
 			Version:          "v25.7.0",
 			ComponentVersion: "network-operator-v25.7.0",
 			Repository:       "nvcr.io/nvstaging/mellanox",
 			Namespace:        "network-operator",
 		},
-		NvIpam: NvIpamConfig{
-			PoolName:     "nv-ipam-pool",
-			Subnet:       "192.168.2.0/24",
-			Gateway:      "192.168.2.1",
-			SubnetOffset: "0.0.1.0",
+		NvIpam: clusterconfig.NvIpamConfig{
+			PoolName: "nv-ipam-pool",
+			Subnets: []clusterconfig.NvIpamSubnetConfig{
+				{Subnet: "192.168.2.0/24", Gateway: "192.168.2.1"},
+				{Subnet: "192.168.3.0/24", Gateway: "192.168.3.1"},
+				{Subnet: "192.168.4.0/24", Gateway: "192.168.4.1"},
+			},
 		},
-		Hostdev: HostdevConfig{
+		Hostdev: clusterconfig.HostdevConfig{
 			ResourceName: "hostdev-resource",
 			NetworkName:  "hostdev-network",
+		},
+		ClusterConfig: clusterconfig.ClusterConfigStruct{
+			NvidiaNICs: clusterconfig.NvidiaNICsConfig{
+				PF: clusterconfig.PFConfig{
+					NetworkInterfaces: []string{"ibs1f0", "ibs1f1", "ibs2f0"},
+				},
+			},
 		},
 	}
 
@@ -36,8 +47,8 @@ func TestHostDeviceRdmaTemplate(t *testing.T) {
 		t.Fatalf("Failed to read template file: %v", err)
 	}
 
-	// Parse and execute the template
-	tmpl, err := template.New("nicclusterpolicy").Parse(string(templateContent))
+	// Parse and execute the template with helper functions
+	tmpl, err := template.New("nicclusterpolicy").Funcs(templateFuncs).Parse(string(templateContent))
 	if err != nil {
 		t.Fatalf("Failed to parse template: %v", err)
 	}
