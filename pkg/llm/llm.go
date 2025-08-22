@@ -2,15 +2,17 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/nvidia/k8s-launch-kit/pkg/config"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func Init() {
+func SelectPrompt(promptPath string, config config.LaunchKubernetesConfig) (map[string]string, error) {
 	// Initialize LLM
 	llm, err := openai.New(
 		openai.WithAPIType(openai.APITypeAzure),
@@ -18,21 +20,45 @@ func Init() {
 		openai.WithBaseURL("https://llm-proxy.perflab.nvidia.com"),
 		openai.WithModel("model-router"),
 		openai.WithEmbeddingModel("text-embedding-3-small"),
-	)
+		openai.WithAPIVersion("2025-02-01-preview"))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	data, err := os.ReadFile("prompt")
+	data, err := os.ReadFile("system-prompt")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
+
 	prompt := string(data)
 
-	response, err := llms.GenerateFromSinglePrompt(context.Background(), llm, prompt, llms.WithTemperature(0.7))
+	configJson, err := json.Marshal(config)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
+	}
+	prompt = fmt.Sprintf("%s\n%s\nUSER:", prompt, string(configJson))
+
+	data, err = os.ReadFile(promptPath)
+	if err != nil {
+		return nil, err
+	}
+	prompt = fmt.Sprintf("%s\n%s", prompt, string(data))
+
+	log.Log.Info("User prompt", "prompt", string(data))
+	//log.Log.Info("LLM prompt", "prompt", prompt)
+
+	response, err := llms.GenerateFromSinglePrompt(context.Background(), llm, prompt, llms.WithTemperature(0.5))
+	if err != nil {
+		return nil, err
 	}
 
-	fmt.Println(response)
+	log.Log.Info("Response", "response", response)
+
+	jsonResponse := make(map[string]string)
+	err = json.Unmarshal([]byte(response), &jsonResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return jsonResponse, nil
 }

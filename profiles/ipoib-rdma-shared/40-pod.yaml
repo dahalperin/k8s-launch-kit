@@ -1,0 +1,46 @@
+{{if .Ipoib.SeparateNetworkPerDevice}}
+{{/* Create test pods for each separate IPoIB network */}}
+{{range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ipoib-test-pod-{{printf "%c" (add 97 $i)}}
+  annotations:
+    k8s.v1.cni.cncf.io/networks: {{$.Ipoib.NetworkName}}-{{printf "%c" (add 97 $i)}}
+spec:
+  containers:
+  - name: test-container
+    image: mellanox/rping-test
+    command: ["/bin/bash", "-c", "sleep infinity"]
+    securityContext:
+      capabilities:
+        add: ["IPC_LOCK"]
+    resources:
+      requests:
+        rdma/{{$.RdmaShared.ResourceName}}-{{printf "%c" (add 97 $i)}}: 1
+      limits:
+        rdma/{{$.RdmaShared.ResourceName}}-{{printf "%c" (add 97 $i)}}: 1
+{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}}---{{end}}
+{{end}}
+{{else}}
+{{/* Create single test pod for shared or first device network */}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ipoib-test-pod
+  annotations:
+    k8s.v1.cni.cncf.io/networks: {{.Ipoib.NetworkName}}
+spec:
+  containers:
+  - name: test-container
+    image: mellanox/rping-test
+    command: ["/bin/bash", "-c", "sleep infinity"]
+    securityContext:
+      capabilities:
+        add: ["IPC_LOCK"]
+    resources:
+      requests:
+        rdma/{{.RdmaShared.ResourceName}}: 1
+      limits:
+        rdma/{{.RdmaShared.ResourceName}}: 1
+{{end}}

@@ -84,16 +84,18 @@ ANALYSIS INSTRUCTIONS:
    - "maximum performance", "HPC" → consider `hostdev_rdma_sriov`
    - "isolation", "multi-tenant" → consider `macvlan_rdma_shared_device`
 
-OUTPUT FORMAT:
-Return only a JSON object with your selection and reasoning:
+4. Analyze the cluster configuration below
 
-```json
+OUTPUT FORMAT:
+Return only a JSON object with your selection and reasoning. Use the exact codenames with kebab-case from the docs for use case name!!! If no use case is applicable because of cluster configuration, fill the error field instead of selected_usecase. Don't add ```json ``` formatting:
+
 {
   "selected_usecase": "usecase_name",
+  "error": "cannot apply any of the use cases to this cluster"
   "confidence": "high|medium|low",
-  "reasoning": "Brief explanation of why this use case was selected",
-  "key_factors": ["factor1", "factor2", "factor3"]
+  "reasoning": "Brief explanation of why this use case was selected or error was returned",
+  "key_factors": "factor 1; factor 2' factor 3"
 }
-```
 
-USER: I have GPUs on every node of my cluster. I want each pod with gpu to have nvidia network
+Cluster configuration:
+

@@ -6,12 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
 	"github.com/nvidia/k8s-launch-kit/pkg/netophelper"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	yaml "sigs.k8s.io/yaml"
 )
 
@@ -46,29 +49,36 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 	}
 	sort.Strings(filePaths)
 
-	// Identify NicClusterPolicy file(s)
-	var ncpFile string
+	// Collect manifests from all files (support multi-doc YAML using '---')
+	var nicDoc []byte
+	var otherDocs [][]byte
 	for _, p := range filePaths {
-		b, rErr := os.ReadFile(p)
+		content, rErr := os.ReadFile(p)
 		if rErr != nil {
 			return rErr
 		}
-		if containsNicClusterPolicyKind(b) {
-			if ncpFile != "" {
-				return fmt.Errorf("multiple NicClusterPolicy manifests found; only one is allowed")
+		docs := splitYAMLDocuments(string(content))
+		for _, doc := range docs {
+			if len(strings.TrimSpace(doc)) == 0 {
+				continue
 			}
-			ncpFile = p
+			b := []byte(doc)
+			if containsNicClusterPolicyKind(b) {
+				if len(nicDoc) != 0 {
+					return fmt.Errorf("multiple NicClusterPolicy manifests found; only one is allowed")
+				}
+				nicDoc = b
+			} else {
+				otherDocs = append(otherDocs, b)
+			}
 		}
 	}
 
-	// Apply NicClusterPolicy file first if present
-	if ncpFile != "" {
-		content, rErr := os.ReadFile(ncpFile)
-		if rErr != nil {
-			return rErr
-		}
+	// Apply NicClusterPolicy first if present
+	if len(nicDoc) != 0 {
+		log.Log.Info("Applying NicClusterPolicy for selected profile")
 		obj := &unstructured.Unstructured{}
-		if err := yaml.Unmarshal(content, obj); err != nil {
+		if err := yaml.Unmarshal(nicDoc, obj); err != nil {
 			return fmt.Errorf("failed to decode NicClusterPolicy: %w", err)
 		}
 		// Ensure GVK set for server-side apply
@@ -82,23 +92,19 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 		if err := applyUnstructured(ctx, c, obj); err != nil {
 			return err
 		}
+
+		log.Log.Info("Waiting for NicClusterPolicy to be ready")
 		if err := netophelper.WaitNicClusterPolicyReady(ctx, c, obj.GetName()); err != nil {
 			return err
 		}
 	}
 
-	// Apply remaining files in order
-	for _, p := range filePaths {
-		if p == ncpFile {
-			continue
-		}
-		content, rErr := os.ReadFile(p)
-		if rErr != nil {
-			return rErr
-		}
+	// Apply remaining manifests
+	log.Log.Info("Applying remaining profile manifests", "count", len(otherDocs))
+	for _, b := range otherDocs {
 		obj := &unstructured.Unstructured{}
-		if err := yaml.Unmarshal(content, obj); err != nil {
-			return fmt.Errorf("failed to decode manifest %s: %w", p, err)
+		if err := yaml.Unmarshal(b, obj); err != nil {
+			return fmt.Errorf("failed to decode manifest: %w", err)
 		}
 		// Ensure GVK set for server-side apply
 		apiv, kind := obj.GetAPIVersion(), obj.GetKind()
@@ -108,8 +114,20 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 				obj.SetGroupVersionKind(gv.WithKind(kind))
 			}
 		}
-		if err := applyUnstructured(ctx, c, obj); err != nil {
-			return err
+		log.Log.Info("Applying object", "kind", obj.GetKind(), "name", obj.GetName(), "version", obj.GetAPIVersion())
+
+		// Apply with retry for Pod kind
+		applyErr := applyUnstructured(ctx, c, obj)
+		if applyErr != nil && strings.EqualFold(obj.GetKind(), "Pod") {
+			const maxAttempts = 3
+			for attempt := 2; attempt <= maxAttempts && applyErr != nil; attempt++ {
+				log.Log.Info("Pod apply failed, retrying", "name", obj.GetName(), "attempt", attempt, "delay", "30s", "error", applyErr.Error())
+				time.Sleep(30 * time.Second)
+				applyErr = applyUnstructured(ctx, c, obj)
+			}
+		}
+		if applyErr != nil {
+			return applyErr
 		}
 	}
 
@@ -131,4 +149,25 @@ func containsNicClusterPolicyKind(b []byte) bool {
 func applyUnstructured(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
 	// kubectl-style server-side apply
 	return c.Patch(ctx, obj, client.Apply, client.FieldOwner("l8k"), client.ForceOwnership)
+}
+
+// splitYAMLDocuments splits a YAML stream by lines that start with '---' (doc separators)
+func splitYAMLDocuments(s string) []string {
+	var docs []string
+	var cur []string
+	lines := strings.Split(s, "\n")
+	for _, ln := range lines {
+		if strings.HasPrefix(strings.TrimSpace(ln), "---") {
+			if len(cur) > 0 {
+				docs = append(docs, strings.Join(cur, "\n"))
+				cur = nil
+			}
+			continue
+		}
+		cur = append(cur, ln)
+	}
+	if len(cur) > 0 {
+		docs = append(docs, strings.Join(cur, "\n"))
+	}
+	return docs
 }

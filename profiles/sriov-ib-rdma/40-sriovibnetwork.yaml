@@ -1,0 +1,14 @@
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+metadata:
+  name: {{.Sriov.NetworkName}}
+  namespace: {{.NetworkOperator.Namespace}}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "{{.NvIpam.PoolName}}"
+    }
+  resourceName: {{.Sriov.ResourceName}}
+  linkState: enable
+  networkNamespace: default

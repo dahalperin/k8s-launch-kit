@@ -8,6 +8,7 @@ import (
 
 	netop "github.com/Mellanox/network-operator/api/v1alpha1"
 	nicop "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // New builds a controller-runtime client using the provided kubeconfig path
@@ -22,6 +23,7 @@ func New(kubeconfigPath string) (client.Client, error) {
 	// Prepare scheme and client
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 	_ = netop.AddToScheme(scheme)
 	_ = nicop.AddToScheme(scheme)
 

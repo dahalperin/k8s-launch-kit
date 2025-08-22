@@ -1,0 +1,17 @@
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov
+  namespace: {{.NetworkOperator.Namespace}}
+spec:
+  deviceType: netdevice
+  mtu: {{.Sriov.Mtu}}
+  nodeSelector:
+    feature.node.kubernetes.io/pci-15b3.present: "true"
+  nicSelector:
+    vendor: "15b3"
+  linkType: IB
+  isRdma: true
+  numVfs: {{.Sriov.NumVfs}}
+  priority: {{.Sriov.Priority}}
+  resourceName: {{.Sriov.ResourceName}}

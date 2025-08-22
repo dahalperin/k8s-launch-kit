@@ -31,6 +31,7 @@ type Options struct {
 
 	// Phase 2: Deployment Generation
 	Profile             string // Network profile to deploy
+	Prompt              string // Path to file with a prompt to use for LLM-assisted profile generation
 	SaveDeploymentFiles string // Directory to save generated files
 
 	// Phase 3: Cluster Deployment
@@ -60,8 +61,6 @@ func (l *Launcher) Run() error {
 		}
 	}
 
-	llm.Init()
-
 	if err := l.executeWorkflow(); err != nil {
 		return fmt.Errorf("workflow execution failed: %w", err)
 	}
@@ -85,20 +84,37 @@ func (l *Launcher) executeWorkflow() error {
 		configPath = l.options.UserConfig
 	}
 
-	if l.options.Profile == "" {
+	if l.options.Profile == "" && l.options.Prompt == "" {
 		l.logger.Info("No profile specified, skipping deployment files generation")
 		return nil
 	}
-	// Phase 2: Deployment Generation
+
 	clusterConfig, err := config.LoadClusterConfig(configPath, l.logger)
 	if err != nil {
 		return fmt.Errorf("failed to load cluster config: %w", err)
 	}
 
+	if l.options.Prompt != "" {
+		l.logger.Info("Selecting a profile using LLM-assisted prompt")
+		prompt, err := llm.SelectPrompt(l.options.Prompt, *clusterConfig)
+		if err != nil {
+			return fmt.Errorf("failed to select prompt: %w", err)
+		}
+		if err, found := prompt["error"]; found {
+			return fmt.Errorf("failed to select profile: %s. Reasoning: %s", err, prompt["reasoning"])
+		}
+		l.options.Profile = prompt["selected_usecase"]
+		l.logger.Info("Selected profile", "profile", l.options.Profile, "reasoning", prompt["reasoning"], "key_factors", prompt["key_factors"])
+	}
+
+	l.logger.Info("Validating selected profile against cluster configuration", "profile", l.options.Profile)
+
 	// Validate config for the selected profile
 	if err := config.ValidateClusterConfig(clusterConfig, l.options.Profile); err != nil {
 		return fmt.Errorf("cluster config validation failed: %w", err)
 	}
+
+	l.logger.Info("Generating deployment files for profile", "profile", l.options.Profile)
 
 	if err := l.generateDeploymentFiles(clusterConfig); err != nil {
 		return fmt.Errorf("deployment files generation failed: %w", err)
@@ -118,12 +134,12 @@ func (l *Launcher) executeWorkflow() error {
 // discoverClusterConfig handles cluster configuration discovery
 func (l *Launcher) discoverClusterConfig() error {
 	if l.options.UserConfig != "" {
-		l.logger.Info("Phase 1: Using provided user config", "path", l.options.UserConfig)
+		l.logger.Info("Using provided user config", "path", l.options.UserConfig)
 		// TODO: Validate and load user config file
 		return nil
 	}
 
-	l.logger.Info("Phase 1: Discovering cluster configuration", "outputPath", l.options.SaveClusterConfig)
+	l.logger.Info("Discovering cluster configuration")
 
 	// Load defaults from l8k-config.yaml (temporary default path)
 	defaultsPath := "l8k-config.yaml"
@@ -216,11 +232,11 @@ func (l *Launcher) saveDeploymentFiles(renderedFiles map[string]string) error {
 // deployConfigurationProfile handles cluster deployment
 func (l *Launcher) deployConfigurationProfile() error {
 	if !l.options.Deploy {
-		l.logger.Info("Phase 3: Skipped (deploy not requested)")
+		l.logger.Info("Skipped (deploy not requested)")
 		return nil
 	}
 
-	l.logger.Info("Phase 3: Deploying to cluster", "kubeconfig", l.options.Kubeconfig)
+	l.logger.Info("Deploying profile to cluster", "profile", l.options.Profile, "kubeconfig", l.options.Kubeconfig)
 
 	if l.options.SaveDeploymentFiles == "" {
 		return fmt.Errorf("--deploy requires generated files directory; provide --save-deployment-files")
@@ -230,6 +246,6 @@ func (l *Launcher) deployConfigurationProfile() error {
 		return fmt.Errorf("failed to deploy manifests: %w", err)
 	}
 
-	l.logger.Info("Deployment applied successfully")
+	l.logger.Info("Deployment profile applied successfully", "profile", l.options.Profile)
 	return nil
 }

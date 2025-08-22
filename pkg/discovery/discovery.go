@@ -38,6 +38,9 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *
 			},
 		},
 	}
+
+	log.Log.Info("Deploying a thin NicClusterPolicy for cluster config discovery")
+
 	if err := netophelper.EnsureNicClusterPolicy(ctx, c, policy); err != nil {
 		return config.ClusterConfig{}, err
 	}
@@ -182,5 +185,10 @@ func buildClusterConfigFromNicDevices(devices []nicop.NicDevice) config.ClusterC
 	cluster.NvidiaNICs.PF.RdmaDevices = toSortedSlice(rdmaSet)
 	cluster.NvidiaNICs.PF.PciAddresses = toSortedSlice(pciSet)
 	cluster.NvidiaNICs.PF.NetworkInterfaces = toSortedSlice(netIfSet)
+
+	if len(rdmaSet) > 0 {
+		cluster.Nodes.Capabilities.Rdma = true
+	}
+
 	return cluster
 }

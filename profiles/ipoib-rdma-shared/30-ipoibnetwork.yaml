@@ -1,0 +1,46 @@
+{{if .Ipoib.SeparateNetworkPerDevice}}
+{{/* Create separate IPoIB networks for each network interface */}}
+{{range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}
+apiVersion: mellanox.com/v1alpha1
+kind: IPoIBNetwork
+metadata:
+  name: {{$.Ipoib.NetworkName}}-{{printf "%c" (add 97 $i)}}
+spec:
+  networkNamespace: "default"
+  master: "{{$iface}}"
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "{{$.NvIpam.PoolName}}-{{printf "%c" (add 97 $i)}}"
+    }
+{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}}---{{end}}
+{{end}}
+{{else if .Ipoib.SingleNetworkForAllDevices}}
+{{/* Create single shared IPoIB network for all devices */}}
+apiVersion: mellanox.com/v1alpha1
+kind: IPoIBNetwork
+metadata:
+  name: {{.Ipoib.NetworkName}}
+spec:
+  networkNamespace: "default"
+  master: "{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "{{.NvIpam.PoolName}}"
+    }
+{{else}}
+{{/* Default: Create network only for the first device */}}
+apiVersion: mellanox.com/v1alpha1
+kind: IPoIBNetwork
+metadata:
+  name: {{.Ipoib.NetworkName}}
+spec:
+  networkNamespace: "default"
+  master: "{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "{{.NvIpam.PoolName}}"
+    }
+{{end}}

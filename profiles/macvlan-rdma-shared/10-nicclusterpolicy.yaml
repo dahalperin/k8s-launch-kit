@@ -1,0 +1,83 @@
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+spec:
+  ofedDriver:
+     image: doca-driver
+     repository: {{.NetworkOperator.Repository}}
+     version: doca3.1.0-25.07-0.9.7.0-0
+     forcePrecompiled: false
+     imagePullSecrets: []
+     terminationGracePeriodSeconds: 300
+     startupProbe:
+       initialDelaySeconds: 10
+       periodSeconds: 20
+     livenessProbe:
+       initialDelaySeconds: 30
+       periodSeconds: 30
+     readinessProbe:
+       initialDelaySeconds: 10
+       periodSeconds: 30
+     upgradePolicy:
+       autoUpgrade: true
+       maxParallelUpgrades: 1
+       safeLoad: false
+       drain:
+         enable: true
+         force: true
+         podSelector: ""
+         timeoutSeconds: 300
+         deleteEmptyDir: true
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: {{.NetworkOperator.Repository}}
+    version: {{.NetworkOperator.ComponentVersion}}
+    config: |
+      {
+        "configList": [
+          {{if .Macvlan.SeparateNetworkPerDevice}}
+          {{/* Create separate RDMA resources for each network interface */}}
+          {{- range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}{
+            "resourceName": "{{$.RdmaShared.ResourceName}}_{{printf "%c" (add 97 $i)}}",
+            "rdmaHcaMax": {{$.RdmaShared.HcaMax}},
+            "selectors": {
+              "ifNames": ["{{$iface}}"]
+            }
+          }{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}},{{end}}{{end}}
+          {{else if .Macvlan.SingleNetworkForAllDevices}}
+          {{/* Create single RDMA resource with all interfaces */}}
+          {
+            "resourceName": "{{.RdmaShared.ResourceName}}",
+            "rdmaHcaMax": {{.RdmaShared.HcaMax}},
+            "selectors": {
+              "ifNames": [{{range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}{{if gt $i 0}}, {{end}}"{{$iface}}"{{end}}]
+            }
+          }
+          {{else}}
+          {{/* Default: Create resource only for the first interface */}}
+          {
+            "resourceName": "{{.RdmaShared.ResourceName}}",
+            "rdmaHcaMax": {{.RdmaShared.HcaMax}},
+            "selectors": {
+              "ifNames": ["{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"]
+            }
+          }
+          {{end}}
+        ]
+      }
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: {{.NetworkOperator.Repository}}
+    version: {{.NetworkOperator.ComponentVersion}}
+    imagePullSecrets: []
+    enableWebhook: false
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: {{.NetworkOperator.Repository}}
+      version: {{.NetworkOperator.ComponentVersion}}
+    multus:
+      image: multus-cni
+      repository: {{.NetworkOperator.Repository}}
+      version: {{.NetworkOperator.ComponentVersion}}

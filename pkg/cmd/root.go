@@ -15,6 +15,7 @@ import (
 var (
 	logLevel              string
 	profile               string
+	prompt                string
 	saveDeploymentFiles   string
 	deploy                bool
 	kubeconfig            string
@@ -52,6 +53,7 @@ network performance with SR-IOV, RDMA, and other networking technologies.`,
 			UserConfig:            userConfig,
 			DiscoverClusterConfig: discoverClusterConfig,
 			Profile:               profile,
+			Prompt:                prompt,
 			SaveDeploymentFiles:   saveDeploymentFiles,
 			Deploy:                deploy,
 			Kubeconfig:            kubeconfig,
@@ -94,6 +96,7 @@ func init() {
 
 	// Phase 2: Deployment generation flags
 	rootCmd.Flags().StringVar(&profile, "profile", "", "Select the network profile to generate deployment files for ("+profiles.GetProfilesString()+")")
+	rootCmd.Flags().StringVar(&prompt, "prompt", "", "Path to file with a prompt to use for LLM-assisted profile generation")
 	rootCmd.Flags().StringVar(&saveDeploymentFiles, "save-deployment-files", "/opt/nvidia/k8s-launch-kit/deployment", "Save generated deployment files to the specified directory")
 
 	// Phase 3: Cluster deployment flags
@@ -116,18 +119,22 @@ func validateConfig(options app.Options) error {
 	}
 
 	// Rule 2: if profile is selected, either save-deployment-files or deploy options should be provided
-	if options.Profile != "" && options.SaveDeploymentFiles == "" && !options.Deploy {
-		return fmt.Errorf("when --profile is specified, either --save-deployment-files or --deploy must be provided")
+	if (options.Profile != "" || options.Prompt != "") && options.SaveDeploymentFiles == "" && !options.Deploy {
+		return fmt.Errorf("when --profile or --prompt is specified, either --save-deployment-files or --deploy must be provided")
 	}
 
 	// Rule 3: save-deployment-files or deploy can't work without profile
-	if options.Profile == "" && (options.Deploy || options.SaveDeploymentFiles != "") {
-		return fmt.Errorf("--deploy requires --profile to be specified")
+	if options.Profile == "" && options.Prompt == "" && (options.Deploy || options.SaveDeploymentFiles != "") {
+		return fmt.Errorf("--deploy requires --profile or --prompt to be specified")
 	}
 
 	// Rule 4: if deploy is provided, kubeconfig should be too
 	if options.Deploy && options.Kubeconfig == "" {
 		return fmt.Errorf("--deploy requires --kubeconfig to be specified")
+	}
+
+	if options.Prompt != "" && options.Profile != "" {
+		return fmt.Errorf("--prompt and --profile cannot be used together")
 	}
 
 	// Validate profile if provided

@@ -1,0 +1,12 @@
+apiVersion: mellanox.com/v1alpha1
+kind: HostDeviceNetwork
+metadata:
+  name: {{.Hostdev.NetworkName}}
+spec:
+  networkNamespace: "default"
+  resourceName: "{{.Hostdev.ResourceName}}"
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "{{.NvIpam.PoolName}}"
+    }

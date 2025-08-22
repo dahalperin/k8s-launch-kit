@@ -36,7 +36,7 @@ func WaitNicClusterPolicyReady(parentCtx context.Context, c client.Client, name 
 	ctx := parentCtx
 	if _, hasDeadline := parentCtx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(parentCtx, 5*time.Minute)
+		ctx, cancel = context.WithTimeout(parentCtx, 15*time.Minute)
 		defer cancel()
 	}
 
