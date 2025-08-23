@@ -11,6 +11,7 @@ spec:
   nicSelector:
     vendor: "15b3"
   isRdma: true
+  linkType: Ethernet
   numVfs: {{.Sriov.NumVfs}}
   priority: {{.Sriov.Priority}}
   resourceName: {{.Sriov.ResourceName}}

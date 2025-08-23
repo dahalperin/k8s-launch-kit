@@ -36,34 +36,27 @@ spec:
     config: |
       {
         "configList": [
-          {{if .Macvlan.SeparateNetworkPerDevice}}
-          {{/* Create separate RDMA resources for each network interface */}}
-          {{- range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}{
+        {{- if .Profile.Multirail -}}
+        {{/* Create separate RDMA resources for each PF network interface */}}
+          {{- range $i, $pf := .ClusterConfig.PFs}}
+          {
             "resourceName": "{{$.RdmaShared.ResourceName}}_{{printf "%c" (add 97 $i)}}",
             "rdmaHcaMax": {{$.RdmaShared.HcaMax}},
             "selectors": {
-              "ifNames": ["{{$iface}}"]
+              "ifNames": ["{{$pf.NetworkInterface}}"]
             }
-          }{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}},{{end}}{{end}}
-          {{else if .Macvlan.SingleNetworkForAllDevices}}
-          {{/* Create single RDMA resource with all interfaces */}}
+          }{{if ne $i (sub (len $.ClusterConfig.PFs) 1)}},{{end}}
+          {{- end}}
+        {{- else}}
+          {{- /* Create single RDMA resource with all interfaces */ -}}
           {
             "resourceName": "{{.RdmaShared.ResourceName}}",
             "rdmaHcaMax": {{.RdmaShared.HcaMax}},
             "selectors": {
-              "ifNames": [{{range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}{{if gt $i 0}}, {{end}}"{{$iface}}"{{end}}]
+              "ifNames": [{{range $i, $pf := .ClusterConfig.PFs}}{{if gt $i 0}}, {{end}}"{{$pf.NetworkInterface}}"{{end}}]
             }
           }
-          {{else}}
-          {{/* Default: Create resource only for the first interface */}}
-          {
-            "resourceName": "{{.RdmaShared.ResourceName}}",
-            "rdmaHcaMax": {{.RdmaShared.HcaMax}},
-            "selectors": {
-              "ifNames": ["{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"]
-            }
-          }
-          {{end}}
+        {{- end}}
         ]
       }
   nvIpam:

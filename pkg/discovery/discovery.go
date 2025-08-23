@@ -3,7 +3,6 @@ package discovery
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	netop "github.com/Mellanox/network-operator/api/v1alpha1"
@@ -153,41 +152,32 @@ func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namesp
 
 // buildClusterConfigFromNicDevices constructs ClusterConfig.NvidiaNICs based on NicDevice statuses.
 func buildClusterConfigFromNicDevices(devices []nicop.NicDevice) config.ClusterConfig {
-	rdmaSet := map[string]struct{}{}
-	pciSet := map[string]struct{}{}
-	netIfSet := map[string]struct{}{}
+	cluster := config.ClusterConfig{}
+	cluster.Capabilities = &config.ClusterCapabilities{
+		Nodes: &config.NodesCapabilities{
+			Rdma:  false,
+			Sriov: false,
+			Ib:    true, // TODO fix
+		},
+	}
+	cluster.PFs = []config.PFConfig{}
 
 	for _, d := range devices {
 		for _, p := range d.Status.Ports {
 			if p.RdmaInterface != "" {
-				rdmaSet[p.RdmaInterface] = struct{}{}
+				cluster.Capabilities.Nodes.Rdma = true
 			}
 			if p.PCI != "" {
-				pciSet[p.PCI] = struct{}{}
+				cluster.Capabilities.Nodes.Sriov = true
 			}
-			if p.NetworkInterface != "" {
-				netIfSet[p.NetworkInterface] = struct{}{}
-			}
+
+			cluster.PFs = append(cluster.PFs, config.PFConfig{
+				RdmaDevice:       p.RdmaInterface,
+				PciAddress:       p.PCI,
+				NetworkInterface: p.NetworkInterface,
+				Traffic:          "east-west", // TODO fix
+			})
 		}
-	}
-
-	toSortedSlice := func(m map[string]struct{}) []string {
-		out := make([]string, 0, len(m))
-		for k := range m {
-			out = append(out, k)
-		}
-		// stable order for determinism
-		sort.Strings(out)
-		return out
-	}
-
-	cluster := config.ClusterConfig{}
-	cluster.NvidiaNICs.PF.RdmaDevices = toSortedSlice(rdmaSet)
-	cluster.NvidiaNICs.PF.PciAddresses = toSortedSlice(pciSet)
-	cluster.NvidiaNICs.PF.NetworkInterfaces = toSortedSlice(netIfSet)
-
-	if len(rdmaSet) > 0 {
-		cluster.Nodes.Capabilities.Rdma = true
 	}
 
 	return cluster

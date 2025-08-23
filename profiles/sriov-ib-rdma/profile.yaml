@@ -1,0 +1,17 @@
+name: SR-IOV Infiniband RDMA
+profileRequirements:
+  fabric: infiniband
+  deployment: sriov
+  multirail: false
+nodeCapabilities:
+  ib: true
+  rdma: true
+description: |
+  SR-IOV Infiniband RDMA profile offers high-performance virtualized Infiniband networking with hardware acceleration
+deploymentGuide: sriov-ib-rdma.rst
+templates:
+  - 10-nicclusterpolicy.yaml
+  - 20-ippool.yaml
+  - 30-sriovnetworknodepolicy.yaml
+  - 40-sriovibnetwork.yaml
+  - 50-pod.yaml

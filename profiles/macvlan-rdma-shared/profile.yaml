@@ -1,0 +1,14 @@
+name: Macvlan with RDMA shared device
+profileRequirements:
+  fabric: ethernet
+  deployment: rdma_shared
+nodeCapabilities:
+  rdma: true
+description: |
+  Macvlan with RDMA shared device profile offers Ethernet networking with shared RDMA resources.
+deploymentGuide: ipoib-rdma-shared.rst
+templates:
+  - 10-nicclusterpolicy.yaml
+  - 20-ippool.yaml
+  - 30-macvlannetwork.yaml
+  - 40-pod.yaml

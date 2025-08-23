@@ -3,18 +3,22 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/app"
 	applog "github.com/nvidia/k8s-launch-kit/pkg/log"
-	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
 )
 
 var (
 	logLevel              string
-	profile               string
+	fabric                string
+	deploymentType        string
+	multirail             bool
+	spectrumX             bool
+	ai                    bool
 	prompt                string
 	saveDeploymentFiles   string
 	deploy                bool
@@ -52,7 +56,11 @@ network performance with SR-IOV, RDMA, and other networking technologies.`,
 			LogLevel:              logLevel,
 			UserConfig:            userConfig,
 			DiscoverClusterConfig: discoverClusterConfig,
-			Profile:               profile,
+			Fabric:                fabric,
+			DeploymentType:        deploymentType,
+			Multirail:             multirail,
+			SpectrumX:             spectrumX,
+			Ai:                    ai,
 			Prompt:                prompt,
 			SaveDeploymentFiles:   saveDeploymentFiles,
 			Deploy:                deploy,
@@ -95,7 +103,11 @@ func init() {
 	rootCmd.Flags().StringVar(&userConfig, "user-config", "", "Use provided cluster configuration file instead of auto-discovery (skips cluster discovery)")
 
 	// Phase 2: Deployment generation flags
-	rootCmd.Flags().StringVar(&profile, "profile", "", "Select the network profile to generate deployment files for ("+profiles.GetProfilesString()+")")
+	rootCmd.Flags().StringVar(&fabric, "fabric", "", "Select the fabric type to deploy (infiniband, ethernet)")
+	rootCmd.Flags().StringVar(&deploymentType, "deployment-type", "", "Select the deployment type (sriov, rdma_shared, host_device)")
+	rootCmd.Flags().BoolVar(&multirail, "multirail", false, "Enable multirail deployment")
+	rootCmd.Flags().BoolVar(&spectrumX, "spectrum-x", false, "Enable Spectrum X deployment")
+	rootCmd.Flags().BoolVar(&ai, "ai", false, "Enable AI deployment")
 	rootCmd.Flags().StringVar(&prompt, "prompt", "", "Path to file with a prompt to use for LLM-assisted profile generation")
 	rootCmd.Flags().StringVar(&saveDeploymentFiles, "save-deployment-files", "/opt/nvidia/k8s-launch-kit/deployment", "Save generated deployment files to the specified directory")
 
@@ -119,13 +131,13 @@ func validateConfig(options app.Options) error {
 	}
 
 	// Rule 2: if profile is selected, either save-deployment-files or deploy options should be provided
-	if (options.Profile != "" || options.Prompt != "") && options.SaveDeploymentFiles == "" && !options.Deploy {
-		return fmt.Errorf("when --profile or --prompt is specified, either --save-deployment-files or --deploy must be provided")
+	if (options.Fabric != "" || options.DeploymentType != "" || options.Prompt != "") && options.SaveDeploymentFiles == "" && !options.Deploy {
+		return fmt.Errorf("when --deployment-type or --prompt is specified, either --save-deployment-files or --deploy must be provided")
 	}
 
 	// Rule 3: save-deployment-files or deploy can't work without profile
-	if options.Profile == "" && options.Prompt == "" && (options.Deploy || options.SaveDeploymentFiles != "") {
-		return fmt.Errorf("--deploy requires --profile or --prompt to be specified")
+	if options.Fabric == "" && options.DeploymentType == "" && options.Prompt == "" && options.Deploy {
+		return fmt.Errorf("--deploy requires --deployment-type or --prompt to be specified")
 	}
 
 	// Rule 4: if deploy is provided, kubeconfig should be too
@@ -133,17 +145,24 @@ func validateConfig(options app.Options) error {
 		return fmt.Errorf("--deploy requires --kubeconfig to be specified")
 	}
 
-	if options.Prompt != "" && options.Profile != "" {
-		return fmt.Errorf("--prompt and --profile cannot be used together")
+	if options.Prompt != "" && (options.Fabric != "" || options.DeploymentType != "") {
+		return fmt.Errorf("--fabric and --prompt cannot be used together")
 	}
 
-	// Validate profile if provided
-	if options.Profile != "" {
-		if !profiles.IsValidProfile(options.Profile) {
-			availableProfiles, _ := profiles.GetAvailableProfiles()
-			return fmt.Errorf("invalid profile '%s', available profiles: %v", options.Profile, availableProfiles)
-		}
-		logger.Info("Using profile", "profile", options.Profile)
+	if (options.DeploymentType != "" && options.Fabric == "") || (options.Fabric != "" && options.DeploymentType == "") {
+		return fmt.Errorf("--deployment-type requires --fabric to be specified")
+	}
+
+	if options.DiscoverClusterConfig && options.Kubeconfig == "" {
+		return fmt.Errorf("--discover-cluster-config requires --kubeconfig to be specified")
+	}
+
+	if options.Fabric != "" && !slices.Contains([]string{"infiniband", "ethernet"}, options.Fabric) {
+		return fmt.Errorf("--fabric must be one of: infiniband, ethernet")
+	}
+
+	if options.DeploymentType != "" && !slices.Contains([]string{"sriov", "rdma_shared", "host_device"}, options.DeploymentType) {
+		return fmt.Errorf("--deployment-type must be one of: sriov, rdma_shared, host_device")
 	}
 
 	return nil

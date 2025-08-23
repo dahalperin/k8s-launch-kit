@@ -8,13 +8,13 @@ import (
 	"text/template"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
+	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
 )
 
 // templateFuncs provides helper functions for Go templates
 var templateFuncs = template.FuncMap{
 	"add": func(a, b int) int { return a + b },
 	"sub": func(a, b int) int { return a - b },
-	"len": func(s []string) int { return len(s) },
 	"gt":  func(a, b int) bool { return a > b },
 }
 
@@ -43,31 +43,16 @@ func ProcessTemplate(templatePath string, config config.LaunchKubernetesConfig) 
 }
 
 // ProcessProfileTemplates processes all template files in a profile directory
-func ProcessProfileTemplates(profileDir string, config config.LaunchKubernetesConfig) (map[string]string, error) {
+func ProcessProfileTemplates(profile *profiles.Profile, config config.LaunchKubernetesConfig) (map[string]string, error) {
 	results := make(map[string]string)
 
-	// Find all YAML files in the profile directory
-	entries, err := os.ReadDir(profileDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read profile directory %s: %w", profileDir, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	for _, templatePath := range profile.Templates {
+		processed, err := ProcessTemplate(templatePath, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process template %s: %w", templatePath, err)
 		}
 
-		filename := entry.Name()
-		if filepath.Ext(filename) == ".yaml" || filepath.Ext(filename) == ".yml" {
-			templatePath := filepath.Join(profileDir, filename)
-
-			processed, err := ProcessTemplate(templatePath, config)
-			if err != nil {
-				return nil, fmt.Errorf("failed to process template %s: %w", filename, err)
-			}
-
-			results[filename] = processed
-		}
+		results[filepath.Base(templatePath)] = processed
 	}
 
 	return results, nil

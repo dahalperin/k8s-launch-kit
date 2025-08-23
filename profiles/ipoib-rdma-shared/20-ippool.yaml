@@ -1,6 +1,6 @@
-{{- if .Ipoib.SeparateNetworkPerDevice -}}
-{{- /* Create separate IP pools for each network interface */}}
-{{- range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}
+{{- if .Profile.Multirail -}}
+{{- /* Create separate IP pools for each PF interface */}}
+{{- range $i, $pf := .ClusterConfig.PFs}}
 apiVersion: nv-ipam.nvidia.com/v1alpha1
 kind: IPPool
 metadata:
@@ -10,7 +10,7 @@ spec:
   subnet: {{(index $.NvIpam.Subnets $i).Subnet}}
   perNodeBlockSize: 50
   gateway: {{(index $.NvIpam.Subnets $i).Gateway}}
-{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}}---{{end}}
+{{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end}}
 {{- end}}
 {{- else}}
 {{- /* Create single shared IP pool or just first device pool */}}

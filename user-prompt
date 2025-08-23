@@ -1,1 +1,1 @@
-I have a multi-tenant cluster and want isolated networks on each NIC
+I want to deploy an Infiniband SR-IOV network on my cluster

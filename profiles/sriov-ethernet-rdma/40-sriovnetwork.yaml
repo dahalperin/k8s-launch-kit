@@ -1,8 +1,8 @@
 {{- if .Profile.Multirail -}}
-{{- /* Create separate SR-IOV IB networks for each PF interface */ -}}
+{{- /* Create separate SR-IOV Ethernet networks for each PF interface */ -}}
 {{- range $i, $pf := .ClusterConfig.PFs}}
 apiVersion: sriovnetwork.openshift.io/v1
-kind: SriovIBNetwork
+kind: SriovNetwork
 metadata:
   name: {{$.Sriov.NetworkName}}-{{printf "%c" (add 97 $i)}}
   namespace: {{$.NetworkOperator.Namespace}}
@@ -12,14 +12,13 @@ spec:
       "type": "nv-ipam",
       "poolName": "{{$.NvIpam.PoolName}}-{{printf "%c" (add 97 $i)}}"
     }
-  resourceName: {{$.Sriov.ResourceName}}
-  linkState: enable
   networkNamespace: default
+  resourceName: {{$.Sriov.ResourceName}}
 {{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}
 {{- end -}}
 {{- else -}}
 apiVersion: sriovnetwork.openshift.io/v1
-kind: SriovIBNetwork
+kind: SriovNetwork
 metadata:
   name: {{.Sriov.NetworkName}}
   namespace: {{.NetworkOperator.Namespace}}
@@ -29,7 +28,6 @@ spec:
       "type": "nv-ipam",
       "poolName": "{{.NvIpam.PoolName}}"
     }
-  resourceName: {{.Sriov.ResourceName}}
-  linkState: enable
   networkNamespace: default
+  resourceName: {{.Sriov.ResourceName}}
 {{- end}}

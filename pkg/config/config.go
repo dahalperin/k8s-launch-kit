@@ -10,14 +10,15 @@ import (
 
 // LaunchKubernetesConfig represents the l8k-config.yaml structure
 type LaunchKubernetesConfig struct {
-	NetworkOperator NetworkOperatorConfig `yaml:"networkOperator"`
-	NvIpam          NvIpamConfig          `yaml:"nvIpam"`
-	Sriov           SriovConfig           `yaml:"sriov"`
-	Hostdev         HostdevConfig         `yaml:"hostdev"`
-	RdmaShared      RdmaSharedConfig      `yaml:"rdmaShared"`
-	Ipoib           IpoibConfig           `yaml:"ipoib"`
-	Macvlan         MacvlanConfig         `yaml:"macvlan"`
-	ClusterConfig   ClusterConfig         `yaml:"clusterConfig"`
+	NetworkOperator *NetworkOperatorConfig `yaml:"networkOperator,omitempty"`
+	NvIpam          *NvIpamConfig          `yaml:"nvIpam,omitempty"`
+	Sriov           *SriovConfig           `yaml:"sriov,omitempty"`
+	Hostdev         *HostdevConfig         `yaml:"hostdev,omitempty"`
+	RdmaShared      *RdmaSharedConfig      `yaml:"rdmaShared,omitempty"`
+	Ipoib           *IpoibConfig           `yaml:"ipoib,omitempty"`
+	Macvlan         *MacvlanConfig         `yaml:"macvlan,omitempty"`
+	Profile         *Profile               `yaml:"profile,omitempty"`
+	ClusterConfig   *ClusterConfig         `yaml:"clusterConfig,omitempty"`
 }
 
 type NetworkOperatorConfig struct {
@@ -56,44 +57,45 @@ type RdmaSharedConfig struct {
 }
 
 type IpoibConfig struct {
-	NetworkName                string `yaml:"networkName"`
-	SeparateNetworkPerDevice   bool   `yaml:"separateNetworkPerDevice"`
-	SingleNetworkForAllDevices bool   `yaml:"singleNetworkForAllDevices"`
+	NetworkName string `yaml:"networkName"`
 }
 
 type MacvlanConfig struct {
-	NetworkName                string `yaml:"networkName"`
-	SeparateNetworkPerDevice   bool   `yaml:"separateNetworkPerDevice"`
-	SingleNetworkForAllDevices bool   `yaml:"singleNetworkForAllDevices"`
+	NetworkName string `yaml:"networkName"`
+}
+
+type Profile struct {
+	Fabric     string `yaml:"fabric"`
+	Deployment string `yaml:"deployment"`
+	Multirail  bool   `yaml:"multirail"`
+	SpectrumX  bool   `yaml:"spectrumX"`
+	Ai         bool   `yaml:"ai"`
 }
 
 type ClusterConfig struct {
-	Nodes      NodesConfig      `yaml:"nodes"`
-	NvidiaNICs NvidiaNICsConfig `yaml:"nvidiaNICs"`
+	Capabilities *ClusterCapabilities `yaml:"capabilities"`
+	PFs          []PFConfig           `yaml:"pfs"`
 }
 
-type NvidiaNICsConfig struct {
-	PF PFConfig `yaml:"pf"`
+type ClusterCapabilities struct {
+	Nodes *NodesCapabilities `yaml:"nodes"`
 }
 
-type NodesConfig struct {
-	Capabilities CapabilitiesConfig `yaml:"capabilities"`
-}
-
-type CapabilitiesConfig struct {
+type NodesCapabilities struct {
 	Sriov bool `yaml:"sriov"`
 	Rdma  bool `yaml:"rdma"`
 	Ib    bool `yaml:"ib"`
 }
 
 type PFConfig struct {
-	RdmaDevices       []string `yaml:"rdmaDevices"`
-	PciAddresses      []string `yaml:"pciAddresses"`
-	NetworkInterfaces []string `yaml:"networkInterfaces"`
+	RdmaDevice       string `yaml:"rdmaDevice"`
+	PciAddress       string `yaml:"pciAddress"`
+	NetworkInterface string `yaml:"networkInterface"`
+	Traffic          string `yaml:"traffic"`
 }
 
-// LoadClusterConfig loads and parses the cluster configuration from the specified path
-func LoadClusterConfig(configPath string, logger logr.Logger) (*LaunchKubernetesConfig, error) {
+// LoadFullConfig loads and parses the cluster configuration from the specified path
+func LoadFullConfig(configPath string, logger logr.Logger) (*LaunchKubernetesConfig, error) {
 	if configPath == "" {
 		return nil, fmt.Errorf("no cluster configuration path provided")
 	}

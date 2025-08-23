@@ -1,13 +1,13 @@
-{{if .Macvlan.SeparateNetworkPerDevice}}
-{{/* Create separate MacVLAN networks for each network interface */}}
-{{range $i, $iface := .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces}}
+{{if .Profile.Multirail}}
+{{/* Create separate MacVLAN networks for each PF interface */}}
+{{range $i, $pf := .ClusterConfig.PFs}}
 apiVersion: mellanox.com/v1alpha1
 kind: MacvlanNetwork
 metadata:
   name: {{$.Macvlan.NetworkName}}-{{printf "%c" (add 97 $i)}}
 spec:
   networkNamespace: "default"
-  master: "{{$iface}}"
+  master: "{{$pf.NetworkInterface}}"
   mode: "bridge"
   mtu: {{$.Sriov.Mtu}}
   ipam: |
@@ -15,9 +15,9 @@ spec:
       "type": "nv-ipam",
       "poolName": "{{$.NvIpam.PoolName}}-{{printf "%c" (add 97 $i)}}"
     }
-{{if ne $i (sub (len $.ClusterConfig.NvidiaNICs.PF.NetworkInterfaces) 1)}}---{{end}}
+{{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end}}
 {{end}}
-{{else if .Macvlan.SingleNetworkForAllDevices}}
+{{else}}
 {{/* Create single shared MacVLAN network for all devices */}}
 apiVersion: mellanox.com/v1alpha1
 kind: MacvlanNetwork
@@ -25,23 +25,7 @@ metadata:
   name: {{.Macvlan.NetworkName}}
 spec:
   networkNamespace: "default"
-  master: "{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"
-  mode: "bridge"
-  mtu: {{.Sriov.Mtu}}
-  ipam: |
-    {
-      "type": "nv-ipam",
-      "poolName": "{{.NvIpam.PoolName}}"
-    }
-{{else}}
-{{/* Default: Create network only for the first device */}}
-apiVersion: mellanox.com/v1alpha1
-kind: MacvlanNetwork
-metadata:
-  name: {{.Macvlan.NetworkName}}
-spec:
-  networkNamespace: "default"
-  master: "{{index .ClusterConfig.NvidiaNICs.PF.NetworkInterfaces 0}}"
+  master: "{{(index .ClusterConfig.PFs 0).NetworkInterface}}"
   mode: "bridge"
   mtu: {{.Sriov.Mtu}}
   ipam: |

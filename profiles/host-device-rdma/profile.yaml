@@ -1,0 +1,14 @@
+name: Host device RDMA
+profileRequirements:
+  deployment: host_device
+  multirail: false
+nodeCapabilities:
+  rdma: true
+description: |
+  Host device RDMA profile offers direct hardware access to the NIC devices with minimal CPU overhead.
+deploymentGuide: host-device-rdma.rst
+templates:
+  - 10-nicclusterpolicy.yaml
+  - 20-ippool.yaml
+  - 30-hostdevicenetwork.yaml
+  - 40-pod.yaml
