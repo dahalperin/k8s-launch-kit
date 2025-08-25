@@ -14,6 +14,7 @@ import (
 	"github.com/nvidia/k8s-launch-kit/pkg/deploy"
 	"github.com/nvidia/k8s-launch-kit/pkg/discovery"
 	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
+	"github.com/nvidia/k8s-launch-kit/pkg/llm"
 	applog "github.com/nvidia/k8s-launch-kit/pkg/log"
 	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
 	"github.com/nvidia/k8s-launch-kit/pkg/templates"
@@ -54,7 +55,7 @@ type Launcher struct {
 func New(options Options) *Launcher {
 	return &Launcher{
 		options: options,
-		logger:  log.Log.WithName("l8k"),
+		logger:  log.Log,
 	}
 }
 
@@ -67,7 +68,7 @@ func (l *Launcher) Run() error {
 	}
 
 	if err := l.executeWorkflow(); err != nil {
-		return fmt.Errorf("workflow execution failed: %w", err)
+		return err
 	}
 
 	return nil
@@ -98,7 +99,7 @@ func (l *Launcher) executeWorkflow() error {
 		return fmt.Errorf("failed to load full config: %w", err)
 	}
 
-	if l.options.UserConfig == "" {
+	if l.options.UserConfig == "" && l.options.Prompt == "" {
 		fullConfig.Profile = &config.Profile{
 			Fabric:     l.options.Fabric,
 			Deployment: l.options.DeploymentType,
@@ -106,22 +107,27 @@ func (l *Launcher) executeWorkflow() error {
 			SpectrumX:  l.options.SpectrumX,
 			Ai:         l.options.Ai,
 		}
+	} else if l.options.Prompt != "" {
+		l.logger.Info("Selecting a profile using LLM-assisted prompt")
+
+		prompt, err := llm.SelectPrompt(l.options.Prompt, *fullConfig.ClusterConfig)
+		if err != nil {
+			return fmt.Errorf("failed to select prompt: %w", err)
+		}
+		confidence := prompt["confidence"]
+		if confidence == "low" {
+			return fmt.Errorf("couldn't select a deployment profile based on the user prompt. Try again with a different prompt or use the cli flags (--fabric, --deployment-type, --multirail) to select the profile manually. Reason: %s", prompt["reasoning"])
+		}
+		fullConfig.Profile = &config.Profile{
+			Fabric:     prompt["fabric"],
+			Deployment: prompt["deploymentType"],
+			Multirail:  prompt["multirail"] == "true",
+			SpectrumX:  prompt["spectrumX"] == "true",
+			Ai:         prompt["ai"] == "true",
+		}
+
+		l.logger.Info("Selected options", "fabric", fullConfig.Profile.Fabric, "deployment", fullConfig.Profile.Deployment, "multirail", fullConfig.Profile.Multirail, "spectrumX", fullConfig.Profile.SpectrumX, "ai", fullConfig.Profile.Ai)
 	}
-
-	// if l.options.Prompt != "" {
-	// 	l.logger.Info("Selecting a profile using LLM-assisted prompt")
-	// 	prompt, err := llm.SelectPrompt(l.options.Prompt, *fullConfig)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to select prompt: %w", err)
-	// 	}
-	// 	if err, found := prompt["error"]; found {
-	// 		return fmt.Errorf("failed to select profile: %s. Reasoning: %s", err, prompt["reasoning"])
-	// 	}
-	// 	l.options.Profile = prompt["selected_usecase"]
-	// 	l.logger.Info("Selected profile", "profile", l.options.Profile, "reasoning", prompt["reasoning"], "key_factors", prompt["key_factors"])
-	// }
-
-	// l.logger.Info("Validating selected profile against cluster configuration", "profile", l.options.Profile)
 
 	profile, err := profiles.FindApplicableProfile(fullConfig.Profile, fullConfig.ClusterConfig.Capabilities)
 	if err != nil {

@@ -79,7 +79,8 @@ network performance with SR-IOV, RDMA, and other networking technologies.`,
 		// Create and run the application
 		launcher := app.New(options)
 		if err := launcher.Run(); err != nil {
-			logger.Error(err, "Application execution failed")
+			fmt.Printf("\nFatal error: %s\n", err)
+			fmt.Println()
 			os.Exit(1)
 		}
 	},

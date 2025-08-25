@@ -18,9 +18,9 @@ spec:
         add: ["IPC_LOCK"]
     resources:
       requests:
-        nvidia.com/{{$.Sriov.ResourceName}}: '1'
+        nvidia.com/{{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}: '1'
       limits:
-        nvidia.com/{{$.Sriov.ResourceName}}: '1'
+        nvidia.com/{{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}: '1'
 {{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}
 {{- end}}
 {{- else}}

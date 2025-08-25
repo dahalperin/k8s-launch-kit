@@ -1,3 +1,28 @@
+{{- if .Profile.Multirail -}}
+{{- /* Create separate SriovNetworkNodePolicy per PF using rootDevices */ -}}
+{{- range $i, $pf := .ClusterConfig.PFs}}
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: infiniband-sriov-{{printf "%c" (add 97 $i)}}
+  namespace: {{$.NetworkOperator.Namespace}}
+spec:
+  deviceType: netdevice
+  mtu: {{$.Sriov.Mtu}}
+  nodeSelector:
+    feature.node.kubernetes.io/pci-15b3.present: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "{{$pf.PciAddress}}"
+  linkType: IB
+  isRdma: true
+  numVfs: {{$.Sriov.NumVfs}}
+  priority: {{$.Sriov.Priority}}
+  resourceName: {{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}
+{{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}
+{{- end -}}
+{{- else -}}
 apiVersion: sriovnetwork.openshift.io/v1
 kind: SriovNetworkNodePolicy
 metadata:
@@ -15,3 +40,4 @@ spec:
   numVfs: {{.Sriov.NumVfs}}
   priority: {{.Sriov.Priority}}
   resourceName: {{.Sriov.ResourceName}}
+{{- end}}

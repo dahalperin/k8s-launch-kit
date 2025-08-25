@@ -2,7 +2,6 @@ name: SR-IOV Infiniband RDMA
 profileRequirements:
   fabric: infiniband
   deployment: sriov
-  multirail: false
 nodeCapabilities:
   ib: true
   rdma: true

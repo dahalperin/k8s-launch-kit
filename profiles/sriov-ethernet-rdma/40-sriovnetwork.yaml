@@ -13,7 +13,7 @@ spec:
       "poolName": "{{$.NvIpam.PoolName}}-{{printf "%c" (add 97 $i)}}"
     }
   networkNamespace: default
-  resourceName: {{$.Sriov.ResourceName}}
+  resourceName: {{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}
 {{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}
 {{- end -}}
 {{- else -}}

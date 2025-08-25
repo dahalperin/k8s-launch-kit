@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func SelectPrompt(promptPath string, config config.LaunchKubernetesConfig) (map[string]string, error) {
+func SelectPrompt(promptPath string, config config.ClusterConfig) (map[string]string, error) {
 	// Initialize LLM
 	llm, err := openai.New(
 		openai.WithAPIType(openai.APITypeAzure),
@@ -44,15 +44,14 @@ func SelectPrompt(promptPath string, config config.LaunchKubernetesConfig) (map[
 	}
 	prompt = fmt.Sprintf("%s\n%s", prompt, string(data))
 
-	log.Log.Info("User prompt", "prompt", string(data))
-	//log.Log.Info("LLM prompt", "prompt", prompt)
+	log.Log.V(1).Info("User prompt", "prompt", string(data))
 
 	response, err := llms.GenerateFromSinglePrompt(context.Background(), llm, prompt, llms.WithTemperature(0.5))
 	if err != nil {
 		return nil, err
 	}
 
-	log.Log.Info("Response", "response", response)
+	log.Log.V(1).Info("LLM Response", "response", response)
 
 	jsonResponse := make(map[string]string)
 	err = json.Unmarshal([]byte(response), &jsonResponse)

@@ -12,7 +12,7 @@ spec:
       "type": "nv-ipam",
       "poolName": "{{$.NvIpam.PoolName}}-{{printf "%c" (add 97 $i)}}"
     }
-  resourceName: {{$.Sriov.ResourceName}}
+  resourceName: {{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}
   linkState: enable
   networkNamespace: default
 {{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}

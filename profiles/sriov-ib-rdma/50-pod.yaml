@@ -1,3 +1,28 @@
+{{- if .Profile.Multirail -}}
+{{- /* Create test pods for each separate SR-IOV IB network (per PF) */ -}}
+{{- range $i, $pf := .ClusterConfig.PFs}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sriov-ib-test-pod-{{printf "%c" (add 97 $i)}}
+  annotations:
+    k8s.v1.cni.cncf.io/networks: {{$.Sriov.NetworkName}}-{{printf "%c" (add 97 $i)}}
+spec:
+  containers:
+  - name: test-container
+    image: mellanox/rping-test
+    command: ["/bin/bash", "-c", "sleep infinity"]
+    securityContext:
+      capabilities:
+        add: ["IPC_LOCK"]
+    resources:
+      requests:
+        nvidia.com/{{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}: '1'
+      limits:
+        nvidia.com/{{$.Sriov.ResourceName}}-{{printf "%c" (add 97 $i)}}: '1'
+{{if ne $i (sub (len $.ClusterConfig.PFs) 1)}}---{{end -}}
+{{- end}}
+{{- else}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -17,3 +42,4 @@ spec:
         nvidia.com/{{.Sriov.ResourceName}}: '1'
       limits:
         nvidia.com/{{.Sriov.ResourceName}}: '1'
+{{- end}}
