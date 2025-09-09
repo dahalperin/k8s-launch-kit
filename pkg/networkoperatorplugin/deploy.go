@@ -1,4 +1,4 @@
-package deploy
+package networkoperatorplugin
 
 import (
 	"context"
@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
-	"github.com/nvidia/k8s-launch-kit/pkg/netophelper"
+	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,18 +20,13 @@ import (
 // Apply reads Kubernetes manifests from dirPath and applies them to the cluster.
 // If a NicClusterPolicy is present, it is applied first and the function waits
 // for it to become ready before applying the remaining manifests.
-func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
+func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *profiles.Profile, kubeClient client.Client, manifestsDir string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	c, err := kubeclient.New(kubeconfigPath)
-	if err != nil {
-		return fmt.Errorf("failed to create k8s client: %w", err)
-	}
-
 	// List files in directory (non-recursive) and sort
-	entries, err := os.ReadDir(dirPath)
+	entries, err := os.ReadDir(manifestsDir)
 	if err != nil {
 		return err
 	}
@@ -45,7 +39,7 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 		if ext != ".yaml" && ext != ".yml" {
 			continue
 		}
-		filePaths = append(filePaths, filepath.Join(dirPath, e.Name()))
+		filePaths = append(filePaths, filepath.Join(manifestsDir, e.Name()))
 	}
 	sort.Strings(filePaths)
 
@@ -89,12 +83,12 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 				obj.SetGroupVersionKind(gv.WithKind(kind))
 			}
 		}
-		if err := applyUnstructured(ctx, c, obj); err != nil {
+		if err := applyUnstructured(ctx, kubeClient, obj); err != nil {
 			return err
 		}
 
 		log.Log.Info("Waiting for NicClusterPolicy to be ready")
-		if err := netophelper.WaitNicClusterPolicyReady(ctx, c, obj.GetName()); err != nil {
+		if err := WaitNicClusterPolicyReady(ctx, kubeClient, obj.GetName()); err != nil {
 			return err
 		}
 	}
@@ -117,13 +111,13 @@ func Apply(ctx context.Context, kubeconfigPath, dirPath string) error {
 		log.Log.Info("Applying object", "kind", obj.GetKind(), "name", obj.GetName(), "version", obj.GetAPIVersion())
 
 		// Apply with retry for Pod kind
-		applyErr := applyUnstructured(ctx, c, obj)
+		applyErr := applyUnstructured(ctx, kubeClient, obj)
 		if applyErr != nil && strings.EqualFold(obj.GetKind(), "Pod") {
 			const maxAttempts = 3
 			for attempt := 2; attempt <= maxAttempts && applyErr != nil; attempt++ {
 				log.Log.Info("Pod apply failed, retrying", "name", obj.GetName(), "attempt", attempt, "delay", "30s", "error", applyErr.Error())
 				time.Sleep(30 * time.Second)
-				applyErr = applyUnstructured(ctx, c, obj)
+				applyErr = applyUnstructured(ctx, kubeClient, obj)
 			}
 		}
 		if applyErr != nil {

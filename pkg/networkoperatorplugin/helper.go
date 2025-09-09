@@ -1,4 +1,4 @@
-package netophelper
+package networkoperatorplugin
 
 import (
 	"context"

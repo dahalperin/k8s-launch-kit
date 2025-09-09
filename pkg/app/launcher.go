@@ -6,57 +6,39 @@ import (
 	"path/filepath"
 
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"context"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
-	"github.com/nvidia/k8s-launch-kit/pkg/deploy"
-	"github.com/nvidia/k8s-launch-kit/pkg/discovery"
 	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
 	"github.com/nvidia/k8s-launch-kit/pkg/llm"
 	applog "github.com/nvidia/k8s-launch-kit/pkg/log"
+	"github.com/nvidia/k8s-launch-kit/pkg/networkoperatorplugin"
+	"github.com/nvidia/k8s-launch-kit/pkg/options"
+	"github.com/nvidia/k8s-launch-kit/pkg/plugin"
 	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
-	"github.com/nvidia/k8s-launch-kit/pkg/templates"
 	"gopkg.in/yaml.v2"
 )
 
-// Options holds all the configuration parameters for the application
-type Options struct {
-	// Logging
-	LogLevel string
-
-	// Phase 1: Cluster Discovery
-	UserConfig            string // Path to user-provided config (skips discovery)
-	DiscoverClusterConfig bool   // Whether to discover cluster config
-	SaveClusterConfig     string // Path to save discovered config
-
-	// Phase 2: Deployment Generation
-	Fabric              string // Fabric type to deploy
-	DeploymentType      string // Deployment type to deploy
-	Multirail           bool   // Whether to deploy with multirail
-	SpectrumX           bool   // Whether to deploy with Spectrum X
-	Ai                  bool   // Whether to deploy with AI
-	Prompt              string // Path to file with a prompt to use for LLM-assisted profile generation
-	SaveDeploymentFiles string // Directory to save generated files
-
-	// Phase 3: Cluster Deployment
-	Deploy     bool   // Whether to deploy to cluster
-	Kubeconfig string // Path to kubeconfig for deployment
-}
-
 // Launcher represents the main application launcher
 type Launcher struct {
-	options Options
-	logger  logr.Logger
+	options    options.Options
+	logger     logr.Logger
+	plugins    map[string]plugin.Plugin
+	kubeClient client.Client
 }
 
 // New creates a new Launcher instance with the given options
-func New(options Options) *Launcher {
-	return &Launcher{
+func New(options options.Options) *Launcher {
+	l := &Launcher{
 		options: options,
 		logger:  log.Log,
+		plugins: make(map[string]plugin.Plugin),
 	}
+
+	return l
 }
 
 // Run executes the main application logic with the 3-phase workflow
@@ -65,6 +47,25 @@ func (l *Launcher) Run() error {
 		if err := applog.SetLogLevel(l.options.LogLevel); err != nil {
 			return fmt.Errorf("failed to set log level: %w", err)
 		}
+	}
+
+	for _, plugin := range l.options.EnabledPlugins {
+		switch plugin {
+		case networkoperatorplugin.PluginName:
+			l.plugins[plugin] = &networkoperatorplugin.NetworkOperatorPlugin{}
+		default:
+			err := fmt.Errorf("unknown plugin: %s", plugin)
+			l.logger.Error(err, "Skipping plugin")
+			return err
+		}
+	}
+
+	if l.options.Kubeconfig != "" {
+		k8sClient, err := kubeclient.New(l.options.Kubeconfig)
+		if err != nil {
+			return fmt.Errorf("failed to create k8s client: %w", err)
+		}
+		l.kubeClient = k8sClient
 	}
 
 	if err := l.executeWorkflow(); err != nil {
@@ -89,8 +90,16 @@ func (l *Launcher) executeWorkflow() error {
 		configPath = l.options.UserConfig
 	}
 
-	if l.options.Fabric == "" && l.options.DeploymentType == "" && l.options.Prompt == "" {
-		l.logger.Info("No fabric, deployment type or prompt specified, skipping deployment files generation")
+	profilesConfiguredInCmd := true
+	for _, plugin := range l.plugins {
+		if !plugin.ProfileConfiguredInCmd(l.options) {
+			profilesConfiguredInCmd = false
+			break
+		}
+	}
+
+	if !profilesConfiguredInCmd && l.options.Prompt == "" {
+		l.logger.Info("Profiles are not configured for every plugin, skipping deployment files generation")
 		return nil
 	}
 
@@ -99,52 +108,63 @@ func (l *Launcher) executeWorkflow() error {
 		return fmt.Errorf("failed to load full config: %w", err)
 	}
 
-	if l.options.UserConfig == "" && l.options.Prompt == "" {
-		fullConfig.Profile = &config.Profile{
-			Fabric:     l.options.Fabric,
-			Deployment: l.options.DeploymentType,
-			Multirail:  l.options.Multirail,
-			SpectrumX:  l.options.SpectrumX,
-			Ai:         l.options.Ai,
-		}
-	} else if l.options.Prompt != "" {
-		l.logger.Info("Selecting a profile using LLM-assisted prompt")
+	if fullConfig.Profile == nil {
+		fullConfig.Profile = &config.Profile{}
 
-		prompt, err := llm.SelectPrompt(l.options.Prompt, *fullConfig.ClusterConfig)
+		if profilesConfiguredInCmd {
+			for _, plugin := range l.plugins {
+				if err := plugin.BuildProfileFromOptions(l.options, fullConfig.Profile); err != nil {
+					return fmt.Errorf("failed to build profile for plugin %s: %w", plugin.GetName(), err)
+				}
+			}
+		} else if l.options.Prompt != "" {
+			l.logger.Info("Selecting a profile using LLM-assisted prompt")
+
+			prompt, err := llm.SelectPrompt(l.options.Prompt, *fullConfig.ClusterConfig)
+			if err != nil {
+				return fmt.Errorf("failed to select prompt: %w", err)
+			}
+			confidence := prompt["confidence"]
+			if confidence == "low" {
+				return fmt.Errorf("couldn't select a deployment profile based on the user prompt. Try again with a different prompt or use the cli flags (--fabric, --deployment-type, --multirail) to select the profile manually. Reason: %s", prompt["reasoning"])
+			}
+
+			for _, plugin := range l.plugins {
+				if err := plugin.BuildProfileFromLLMResponse(prompt, fullConfig.Profile); err != nil {
+					return fmt.Errorf("failed to build profile for plugin %s: %w", plugin.GetName(), err)
+				}
+			}
+
+			l.logger.Info("Selected options", "fabric", fullConfig.Profile.Fabric, "deployment", fullConfig.Profile.Deployment, "multirail", fullConfig.Profile.Multirail, "spectrumX", fullConfig.Profile.SpectrumX, "ai", fullConfig.Profile.Ai)
+		} else {
+			return fmt.Errorf("no profile configured in the command line and no prompt provided")
+		}
+	}
+
+	foundProfiles := []profiles.Profile{}
+	for pluginName, plugin := range l.plugins {
+		profile, err := profiles.FindApplicableProfile(fullConfig.Profile, fullConfig.ClusterConfig.Capabilities, pluginName)
 		if err != nil {
-			return fmt.Errorf("failed to select prompt: %w", err)
+			l.logger.Error(err, "Failed to find applicable profile for the plugin", "plugin", plugin.GetName(), "cluster capabilities", fullConfig.ClusterConfig.Capabilities, "profile requirements", fullConfig.Profile)
+			return err
 		}
-		confidence := prompt["confidence"]
-		if confidence == "low" {
-			return fmt.Errorf("couldn't select a deployment profile based on the user prompt. Try again with a different prompt or use the cli flags (--fabric, --deployment-type, --multirail) to select the profile manually. Reason: %s", prompt["reasoning"])
-		}
-		fullConfig.Profile = &config.Profile{
-			Fabric:     prompt["fabric"],
-			Deployment: prompt["deploymentType"],
-			Multirail:  prompt["multirail"] == "true",
-			SpectrumX:  prompt["spectrumX"] == "true",
-			Ai:         prompt["ai"] == "true",
-		}
-
-		l.logger.Info("Selected options", "fabric", fullConfig.Profile.Fabric, "deployment", fullConfig.Profile.Deployment, "multirail", fullConfig.Profile.Multirail, "spectrumX", fullConfig.Profile.SpectrumX, "ai", fullConfig.Profile.Ai)
+		foundProfiles = append(foundProfiles, *profile)
 	}
 
-	profile, err := profiles.FindApplicableProfile(fullConfig.Profile, fullConfig.ClusterConfig.Capabilities)
-	if err != nil {
-		l.logger.Error(err, "Failed to find applicable profile for the cluster", "cluster capabilities", fullConfig.ClusterConfig.Capabilities, "profile requirements", fullConfig.Profile)
-		return err
-	}
+	for _, profile := range foundProfiles {
+		l.logger.Info("Generating deployment files for profile", "profile", profile.Name)
 
-	l.logger.Info("Generating deployment files for profile", "profile", profile.Name)
-
-	if err := l.generateDeploymentFiles(profile, fullConfig); err != nil {
-		return fmt.Errorf("deployment files generation failed: %w", err)
+		if err := l.generateDeploymentFiles(&profile, fullConfig); err != nil {
+			return fmt.Errorf("deployment files generation failed: %w", err)
+		}
 	}
 
 	// Phase 3: Cluster Deployment
 	if l.options.Deploy {
-		if err := l.deployConfigurationProfile(profile); err != nil {
-			return fmt.Errorf("deployment failed: %w", err)
+		for _, profile := range foundProfiles {
+			if err := l.deployConfigurationProfile(&profile); err != nil {
+				return fmt.Errorf("deployment failed: %w", err)
+			}
 		}
 	}
 
@@ -169,21 +189,23 @@ func (l *Launcher) discoverClusterConfig() error {
 		return fmt.Errorf("failed to load default config from %s: %w", defaultsPath, err)
 	}
 
-	// Build Kubernetes client
-	k8sClient, err := kubeclient.New(l.options.Kubeconfig)
-	if err != nil {
-		return fmt.Errorf("failed to create k8s client: %w", err)
+	defaults.ClusterConfig = &config.ClusterConfig{
+		Capabilities: &config.ClusterCapabilities{
+			Nodes: &config.NodesCapabilities{},
+		},
+		PFs:         []config.PFConfig{},
+		WorkerNodes: []string{},
+	}
+	defaults.Profile = nil
+
+	for _, plugin := range l.plugins {
+		err := plugin.DiscoverClusterConfig(context.Background(), l.kubeClient, defaults)
+		if err != nil {
+			return fmt.Errorf("failed to discover cluster config: %w", err)
+		}
 	}
 
-	// Discover cluster config using client and defaults for network-operator
-	clusterCfg, err := discovery.DiscoverClusterConfig(context.Background(), k8sClient, defaults.NetworkOperator)
-	if err != nil {
-		return fmt.Errorf("failed to discover cluster config: %w", err)
-	}
-
-	// Merge discovered cluster config into defaults
 	discoveredConfig := *defaults
-	discoveredConfig.ClusterConfig = &clusterCfg
 
 	// Ensure output path provided
 	if l.options.SaveClusterConfig == "" {
@@ -211,13 +233,18 @@ func (l *Launcher) generateDeploymentFiles(profile *profiles.Profile, clusterCon
 	l.logger.Info("Generating deployment files", "profile", profile.Name)
 	l.logger.Info("Generating deployment files", "config", clusterConfig)
 
-	renderedFiles, err := templates.ProcessProfileTemplates(profile, *clusterConfig)
+	plugin, ok := l.plugins[profile.Plugin]
+	if !ok {
+		return fmt.Errorf("plugin %s not found", profile.Plugin)
+	}
+
+	renderedFiles, err := plugin.GenerateProfileDeploymentFiles(profile, clusterConfig)
 	if err != nil {
 		return fmt.Errorf("failed to process profile templates: %w", err)
 	}
 
 	if l.options.SaveDeploymentFiles != "" {
-		if err := l.saveDeploymentFiles(renderedFiles); err != nil {
+		if err := l.saveDeploymentFiles(renderedFiles, filepath.Join(l.options.SaveDeploymentFiles, profile.Plugin)); err != nil {
 			return fmt.Errorf("failed to save deployment files: %w", err)
 		}
 	}
@@ -226,19 +253,19 @@ func (l *Launcher) generateDeploymentFiles(profile *profiles.Profile, clusterCon
 }
 
 // saveDeploymentFiles saves the rendered deployment files to disk
-func (l *Launcher) saveDeploymentFiles(renderedFiles map[string]string) error {
-	l.logger.Info("Saving deployment files", "directory", l.options.SaveDeploymentFiles)
+func (l *Launcher) saveDeploymentFiles(renderedFiles map[string]string, outputDir string) error {
+	l.logger.Info("Saving deployment files", "directory", outputDir)
 
 	// Clean the output directory before saving files
-	if err := os.RemoveAll(l.options.SaveDeploymentFiles); err != nil {
-		return fmt.Errorf("failed to clean output directory %s: %w", l.options.SaveDeploymentFiles, err)
+	if err := os.RemoveAll(outputDir); err != nil {
+		return fmt.Errorf("failed to clean output directory %s: %w", outputDir, err)
 	}
-	if err := os.MkdirAll(l.options.SaveDeploymentFiles, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory %s: %w", l.options.SaveDeploymentFiles, err)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 
 	for filename, content := range renderedFiles {
-		outputPath := fmt.Sprintf("%s/%s", l.options.SaveDeploymentFiles, filename)
+		outputPath := fmt.Sprintf("%s/%s", outputDir, filename)
 
 		if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write file %s: %w", outputPath, err)
@@ -248,7 +275,7 @@ func (l *Launcher) saveDeploymentFiles(renderedFiles map[string]string) error {
 	}
 
 	l.logger.Info("All deployment files saved successfully",
-		"directory", l.options.SaveDeploymentFiles,
+		"directory", outputDir,
 		"fileCount", len(renderedFiles))
 
 	return nil
@@ -267,8 +294,13 @@ func (l *Launcher) deployConfigurationProfile(profile *profiles.Profile) error {
 		return fmt.Errorf("--deploy requires generated files directory; provide --save-deployment-files")
 	}
 
-	if err := deploy.Apply(context.Background(), l.options.Kubeconfig, l.options.SaveDeploymentFiles); err != nil {
-		return fmt.Errorf("failed to deploy manifests: %w", err)
+	plugin, ok := l.plugins[profile.Plugin]
+	if !ok {
+		return fmt.Errorf("plugin %s not found", profile.Plugin)
+	}
+
+	if err := plugin.DeployProfile(context.Background(), profile, l.kubeClient, filepath.Join(l.options.SaveDeploymentFiles, profile.Plugin)); err != nil {
+		return fmt.Errorf("failed to deploy profile: %w", err)
 	}
 
 	l.logger.Info("Deployment profile applied successfully", "profile", profile.Name)

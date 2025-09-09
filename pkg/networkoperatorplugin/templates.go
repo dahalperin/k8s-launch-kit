@@ -1,4 +1,4 @@
-package templates
+package networkoperatorplugin
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ var templateFuncs = template.FuncMap{
 }
 
 // ProcessTemplate processes a Go template file with the given config
-func ProcessTemplate(templatePath string, config config.LaunchKubernetesConfig) (string, error) {
+func ProcessTemplate(templatePath string, config *config.LaunchKubernetesConfig) (string, error) {
 	// Read the template file
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
@@ -43,7 +43,7 @@ func ProcessTemplate(templatePath string, config config.LaunchKubernetesConfig) 
 }
 
 // ProcessProfileTemplates processes all template files in a profile directory
-func ProcessProfileTemplates(profile *profiles.Profile, config config.LaunchKubernetesConfig) (map[string]string, error) {
+func (p *NetworkOperatorPlugin) GenerateProfileDeploymentFiles(profile *profiles.Profile, config *config.LaunchKubernetesConfig) (map[string]string, error) {
 	results := make(map[string]string)
 
 	for _, templatePath := range profile.Templates {

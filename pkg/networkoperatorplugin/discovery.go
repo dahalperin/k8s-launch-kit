@@ -1,4 +1,4 @@
-package discovery
+package networkoperatorplugin
 
 import (
 	"context"
@@ -8,31 +8,30 @@ import (
 	netop "github.com/Mellanox/network-operator/api/v1alpha1"
 	nicop "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
-	"github.com/nvidia/k8s-launch-kit/pkg/netophelper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *config.NetworkOperatorConfig) (config.ClusterConfig, error) {
+func (p *NetworkOperatorPlugin) DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *config.LaunchKubernetesConfig) error {
 	// Ensure a NicClusterPolicy exists (error if any already exists, else create one)
 	policy := &netop.NicClusterPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "nic-cluster-policy",
-			Namespace: defaultConfig.Namespace,
+			Namespace: defaultConfig.NetworkOperator.Namespace,
 		},
 		Spec: netop.NicClusterPolicySpec{
 			NicConfigurationOperator: &netop.NicConfigurationOperatorSpec{
 				Operator: &netop.ImageSpec{
-					Repository: defaultConfig.Repository,
+					Repository: defaultConfig.NetworkOperator.Repository,
 					Image:      "nic-configuration-operator",
-					Version:    defaultConfig.ComponentVersion,
+					Version:    defaultConfig.NetworkOperator.ComponentVersion,
 				},
 				ConfigurationDaemon: &netop.ImageSpec{
-					Repository: defaultConfig.Repository,
+					Repository: defaultConfig.NetworkOperator.Repository,
 					Image:      "nic-configuration-operator-daemon",
-					Version:    defaultConfig.ComponentVersion,
+					Version:    defaultConfig.NetworkOperator.ComponentVersion,
 				},
 			},
 		},
@@ -40,13 +39,13 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *
 
 	log.Log.Info("Deploying a thin NicClusterPolicy for cluster config discovery")
 
-	if err := netophelper.EnsureNicClusterPolicy(ctx, c, policy); err != nil {
-		return config.ClusterConfig{}, err
+	if err := EnsureNicClusterPolicy(ctx, c, policy); err != nil {
+		return err
 	}
 
 	// Always attempt cleanup of the NicClusterPolicy at the end of discovery
 	defer func() {
-		if err := netophelper.DeleteNicClusterPolicy(ctx, c, "nic-cluster-policy"); err != nil {
+		if err := DeleteNicClusterPolicy(ctx, c, "nic-cluster-policy"); err != nil {
 			log.Log.Error(err, "failed to delete NicClusterPolicy after discovery")
 		} else {
 			log.Log.Info("NicClusterPolicy deleted after discovery")
@@ -55,29 +54,30 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *
 
 	// After creation, list pods in the target namespace and ensure all pods
 	// from the nic-configuration-daemon DaemonSet are Ready
-	if err := checkDaemonSetPodsReady(ctx, c, defaultConfig.Namespace, "nic-configuration-daemon"); err != nil {
-		return config.ClusterConfig{}, err
+	if err := checkDaemonSetPodsReady(ctx, c, defaultConfig.NetworkOperator.Namespace, "nic-configuration-daemon"); err != nil {
+		return err
 	}
 
 	// Get NicDevice resources and build ClusterConfig.NvidiaNICs from their statuses
 	devices := &nicop.NicDeviceList{}
-	if err := c.List(ctx, devices, client.InNamespace(defaultConfig.Namespace)); err != nil {
-		return config.ClusterConfig{}, err
+	if err := c.List(ctx, devices, client.InNamespace(defaultConfig.NetworkOperator.Namespace)); err != nil {
+		return err
 	}
 	if len(devices.Items) == 0 {
-		log.Log.Info("No NicDevice resources found yet; waiting for discovery", "namespace", defaultConfig.Namespace)
-		if err := waitNicDevicesDiscovered(ctx, c, defaultConfig.Namespace); err != nil {
-			return config.ClusterConfig{}, err
+		log.Log.Info("No NicDevice resources found yet; waiting for discovery", "namespace", defaultConfig.NetworkOperator.Namespace)
+		if err := waitNicDevicesDiscovered(ctx, c, defaultConfig.NetworkOperator.Namespace); err != nil {
+			return err
 		}
 		// re-list after wait
-		if err := c.List(ctx, devices, client.InNamespace(defaultConfig.Namespace)); err != nil {
-			return config.ClusterConfig{}, err
+		if err := c.List(ctx, devices, client.InNamespace(defaultConfig.NetworkOperator.Namespace)); err != nil {
+			return err
 		}
 		log.Log.Info("NicDevice resources discovered", "count", len(devices.Items))
 	}
-	built := buildClusterConfigFromNicDevices(devices.Items)
 
-	return built, nil
+	buildClusterConfigFromNicDevices(devices.Items, defaultConfig.ClusterConfig)
+
+	return nil
 }
 
 // checkDaemonSetPodsReady verifies that all pods owned by the given DaemonSet
@@ -151,16 +151,13 @@ func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namesp
 }
 
 // buildClusterConfigFromNicDevices constructs ClusterConfig.NvidiaNICs based on NicDevice statuses.
-func buildClusterConfigFromNicDevices(devices []nicop.NicDevice) config.ClusterConfig {
-	cluster := config.ClusterConfig{}
-	cluster.Capabilities = &config.ClusterCapabilities{
-		Nodes: &config.NodesCapabilities{
-			Rdma:  false,
-			Sriov: false,
-			Ib:    true, // TODO fix
-		},
-	}
+func buildClusterConfigFromNicDevices(devices []nicop.NicDevice, cluster *config.ClusterConfig) {
+	cluster.Capabilities.Nodes.Rdma = false
+	cluster.Capabilities.Nodes.Sriov = false
+	cluster.Capabilities.Nodes.Ib = true // TODO fix
+
 	cluster.PFs = []config.PFConfig{}
+	workerNodes := map[string]interface{}{}
 
 	for _, d := range devices {
 		for _, p := range d.Status.Ports {
@@ -178,7 +175,11 @@ func buildClusterConfigFromNicDevices(devices []nicop.NicDevice) config.ClusterC
 				Traffic:          "east-west", // TODO fix
 			})
 		}
+
+		workerNodes[d.Status.Node] = struct{}{}
 	}
 
-	return cluster
+	for node := range workerNodes {
+		cluster.WorkerNodes = append(cluster.WorkerNodes, node)
+	}
 }

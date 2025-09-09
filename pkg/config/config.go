@@ -75,6 +75,7 @@ type Profile struct {
 type ClusterConfig struct {
 	Capabilities *ClusterCapabilities `yaml:"capabilities"`
 	PFs          []PFConfig           `yaml:"pfs"`
+	WorkerNodes  []string             `yaml:"workerNodes"`
 }
 
 type ClusterCapabilities struct {

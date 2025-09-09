@@ -1,4 +1,5 @@
 name: SR-IOV Infiniband RDMA
+plugin: network-operator
 profileRequirements:
   fabric: infiniband
   deployment: sriov

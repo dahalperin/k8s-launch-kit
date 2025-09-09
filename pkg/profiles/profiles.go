@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ type NodeCapabilities struct {
 
 type Profile struct {
 	Name                string
+	Plugin              string
 	Description         string
 	ProfileRequirements ProfileRequirements `yaml:"profileRequirements"`
 	NodeCapabilities    NodeCapabilities    `yaml:"nodeCapabilities"`
@@ -35,7 +37,7 @@ type Profile struct {
 
 const ProfilesDir = "profiles"
 
-func FindApplicableProfile(requirements *config.Profile, capabilities *config.ClusterCapabilities) (*Profile, error) {
+func FindApplicableProfile(requirements *config.Profile, capabilities *config.ClusterCapabilities, pluginName string) (*Profile, error) {
 	log.Log.Info("Finding applicable profile", "requirements", requirements)
 	entries, err := os.ReadDir(ProfilesDir)
 	if err != nil {
@@ -60,6 +62,9 @@ func FindApplicableProfile(requirements *config.Profile, capabilities *config.Cl
 				log.Log.Error(err, "failed to unmarshal profile manifest", "profileManifest", profileManifest)
 				return nil, err
 			}
+			if profile.Plugin != pluginName {
+				continue
+			}
 			valid, reason := profile.Validate(requirements, capabilities)
 			if valid {
 				log.Log.V(1).Info("Found applicable profile", "profile", profile)
@@ -73,10 +78,10 @@ func FindApplicableProfile(requirements *config.Profile, capabilities *config.Cl
 
 	log.Log.Info("No applicable profile found based on the given requirements")
 	for _, errorMessage := range errorMessages {
-		log.Log.Error(fmt.Errorf(errorMessage), "errorMessage")
+		log.Log.Error(errors.New(errorMessage), "errorMessage")
 	}
 
-	return nil, fmt.Errorf("no applicable profile found")
+	return nil, errors.New("no applicable profile found")
 }
 
 func (p *Profile) Validate(requirements *config.Profile, capabilities *config.ClusterCapabilities) (bool, string) {

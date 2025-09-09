@@ -1,4 +1,5 @@
 name: SR-IOV Ethernet RDMA
+plugin: network-operator
 profileRequirements:
   fabric: ethernet
   deployment: sriov
