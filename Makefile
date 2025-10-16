@@ -27,11 +27,11 @@ build:
 	$(GOBUILD) $(LDFLAGS) -o $(BINARY_PATH) .
 
 ## Build for all platforms
-build-all: build-linux build-windows build-darwin
+build-all: build-linux build-windows build-darwin build-darwin-arm64
 
 build-linux:
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 build-windows:
 	@mkdir -p $(BUILD_DIR)
@@ -40,6 +40,11 @@ build-windows:
 build-darwin:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 .
+
+## Build macOS (arm64)
+build-darwin-arm64:
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 .
 
 ## Clean build artifacts
 clean:
