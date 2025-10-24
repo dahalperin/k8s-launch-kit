@@ -138,6 +138,16 @@ l8k --user-config ./config.yaml \
     --save-deployment-files ./deployments
 ```
 
+## Docker container
+
+You can run the l8k tool as a docker container:
+
+```bash
+docker run -v ~/launch-kubernetes/user-prompt:/user-prompt -v ~/remote-cluster/:/remote-cluster -v /tmp:/output --net=host harbor.mellanox.com/k8s-launch-kit:poc --discover-cluster-config --kubeconfig /remote-cluster/kubeconf.yaml --save-cluster-config /output/config.yaml --log-level debug  --save-deployment-files /output --fabric infiniband --deployment-type rdma_shared --multirail
+```
+
+Don't forget to enable `--net=host` and mount the necessary directories for input and output files with `-v`.
+
 ## Development
 
 ### Building
