@@ -3,6 +3,32 @@ kind: NicClusterPolicy
 metadata:
   name: nic-cluster-policy
 spec:
+  ofedDriver:
+    image: doca-driver
+    repository: {{.NetworkOperator.Repository}}
+    version: {{.DOCADriver.Version}}
+    env:
+      - name: UNLOAD_STORAGE_MODULES
+        value: "{{.DOCADriver.UnloadStorageModules}}"
+      - name: ENABLE_NFSRDMA
+        value: "{{.DOCADriver.EnableNFSRDMA}}"
+    upgradePolicy:
+      autoUpgrade: true
+      drain:
+        deleteEmptyDir: true
+        enable: true
+        force: true
+        timeoutSeconds: 300
+      maxParallelUpgrades: 1
+    startupProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+    readinessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 30
   nvIpam:
     image: nvidia-k8s-ipam
     repository: {{.NetworkOperator.Repository}}

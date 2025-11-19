@@ -1,0 +1,86 @@
+networkOperator:
+  version: v25.10.0
+  componentVersion: network-operator-v25.10.0
+  repository: nvcr.io/nvidia/mellanox
+  namespace: nvidia-network-operator
+
+docaDriver:
+  version: doca3.2.0-25.10-1.2.8.0-1
+  unloadStorageModules: false
+  enableNFSRDMA: false
+
+nvIpam:
+  poolName: nv-ipam-pool
+  subnets:
+  - subnet: 192.168.2.0/24
+    gateway: 192.168.2.1
+  - subnet: 192.168.3.0/24
+    gateway: 192.168.3.1
+  - subnet: 192.168.4.0/24
+    gateway: 192.168.4.1
+  - subnet: 192.168.5.0/24
+    gateway: 192.168.5.1
+  - subnet: 192.168.6.0/24
+    gateway: 192.168.6.1
+  - subnet: 192.168.7.0/24
+    gateway: 192.168.7.1
+  - subnet: 192.168.8.0/24
+    gateway: 192.168.8.1
+  - subnet: 192.168.9.0/24
+    gateway: 192.168.9.1
+  - subnet: 192.168.10.0/24
+    gateway: 192.168.10.1
+
+sriov:
+  mtu: 9000
+  numVfs: 8
+  priority: 90
+  resourceName: sriov_resource
+  networkName: sriov_network
+
+hostdev:
+  resourceName: hostdev-resource
+  networkName: hostdev-network
+
+rdmaShared:
+  resourceName: rdma_shared_resource # with multiple pools, _a, _b, _c, prefixes are added to the resource name
+  hcaMax: 63
+
+ipoib:
+  networkName: ipoib-network # with multiple networks, -a, -b, -c, prefixes are added to the network name
+
+macvlan:
+  networkName: macvlan-network # with multiple networks, -a, -b, -c, prefixes are added to the network name
+
+profile:
+  fabric: ethernet # infiniband, ethernet TODO consider ETH/IB
+  deployment: sriov # rdma_shared, sriov, host_device
+  multirail: false
+  spectrumX: false
+  ai: false
+
+clusterConfig:
+  capabilities:
+    nodes:
+      sriov: true # has nodes with feature.node.kubernetes.io/pci-15b3.present=true
+      rdma: true # has nodes with feature.node.kubernetes.io/rdma.capable=true
+      ib: true # has nodes with IB capable NICs (find via nic config op)      
+  workerNodes: ["worker-0", "worker-1", "worker-2"]
+  pfs:
+    - deviceID: 101d
+      pciAddress: 0000:08:00.0
+      rdmaDevice: "mlx5_0"
+      networkInterface: "ibs1f0"
+      traffic: east-west
+    - deviceID: 101d
+      pciAddress: 0000:08:00.1
+      rdmaDevice: "mlx5_1"
+      networkInterface: "ibs1f0"
+      traffic: east-west
+    - deviceID: 1015
+      pciAddress: 0000:3b:00.0
+      rdmaDevice: "mlx5_2"
+      networkInterface: "ibs2f0"
+      traffic: east-west
+  nodeSelector:
+    feature.node.kubernetes.io/pci-15b3.present: "true"

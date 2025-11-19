@@ -27,6 +27,7 @@ import (
 // LaunchKubernetesConfig represents the l8k-config.yaml structure
 type LaunchKubernetesConfig struct {
 	NetworkOperator *NetworkOperatorConfig `yaml:"networkOperator,omitempty"`
+	DOCADriver      *DOCADriverConfig      `yaml:"docaDriver,omitempty"`
 	NvIpam          *NvIpamConfig          `yaml:"nvIpam,omitempty"`
 	Sriov           *SriovConfig           `yaml:"sriov,omitempty"`
 	Hostdev         *HostdevConfig         `yaml:"hostdev,omitempty"`
@@ -42,6 +43,12 @@ type NetworkOperatorConfig struct {
 	ComponentVersion string `yaml:"componentVersion"`
 	Repository       string `yaml:"repository"`
 	Namespace        string `yaml:"namespace"`
+}
+
+type DOCADriverConfig struct {
+	Version              string `yaml:"version"`
+	UnloadStorageModules bool   `yaml:"unloadStorageModules"`
+	EnableNFSRDMA        bool   `yaml:"enableNFSRDMA"`
 }
 
 type NvIpamConfig struct {
