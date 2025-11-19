@@ -4,31 +4,31 @@ metadata:
   name: nic-cluster-policy
 spec:
   ofedDriver:
-     image: doca-driver
-     repository: {{.NetworkOperator.Repository}}
-     version: doca3.1.0-25.07-0.9.7.0-0
-     forcePrecompiled: false
-     imagePullSecrets: []
-     terminationGracePeriodSeconds: 300
-     startupProbe:
-       initialDelaySeconds: 10
-       periodSeconds: 20
-     livenessProbe:
-       initialDelaySeconds: 30
-       periodSeconds: 30
-     readinessProbe:
-       initialDelaySeconds: 10
-       periodSeconds: 30
-     upgradePolicy:
-       autoUpgrade: true
-       maxParallelUpgrades: 1
-       safeLoad: false
-       drain:
-         enable: true
-         force: true
-         podSelector: ""
-         timeoutSeconds: 300
-         deleteEmptyDir: true
+    image: doca-driver
+    repository: {{.NetworkOperator.Repository}}
+    version: {{.DOCADriver.Version}}
+    env:
+      - name: UNLOAD_STORAGE_MODULES
+        value: "{{.DOCADriver.UnloadStorageModules}}"
+      - name: ENABLE_NFSRDMA
+        value: "{{.DOCADriver.EnableNFSRDMA}}"
+    upgradePolicy:
+      autoUpgrade: true
+      drain:
+        deleteEmptyDir: true
+        enable: true
+        force: true
+        timeoutSeconds: 300
+      maxParallelUpgrades: 1
+    startupProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+    readinessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 30
   rdmaSharedDevicePlugin:
     image: k8s-rdma-shared-dev-plugin
     repository: {{.NetworkOperator.Repository}}
