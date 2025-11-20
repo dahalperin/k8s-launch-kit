@@ -8,9 +8,6 @@ jobs:
     name: Image build and push
     runs-on: ubuntu-latest
     steps:
-      - name: Set repository as lower-case output variable
-        id: repo_name
-        run: echo ::set-output name=repository::$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
       - name: Check out code into the Go module directory
         uses: actions/checkout@v5
         with:
@@ -29,12 +26,12 @@ jobs:
         id: docker_meta
         uses: docker/metadata-action@v5
         with:
-          images: nvcr.io/nvstaging/mellanox/${{ github.repository }}
+          images: nvcr.io/nvstaging/mellanox/k8s-launch-kit
       - name: Build and push container image
         uses: docker/build-push-action@v6
         with:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            nvcr.io/nvstaging/mellanox/${{ github.repository }}:${{ github.ref_name }}
+            nvcr.io/nvstaging/mellanox/k8s-launch-kit:${{ github.ref_name }}
           labels: ${{ steps.docker_meta.outputs.labels }}
