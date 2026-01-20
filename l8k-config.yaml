@@ -32,7 +32,8 @@ nvIpam:
     gateway: 192.168.10.1
 
 sriov:
-  mtu: 9000
+  ethernetMtu: 9000
+  infinibandMtu: 4000
   numVfs: 8
   priority: 90
   resourceName: sriov_resource
