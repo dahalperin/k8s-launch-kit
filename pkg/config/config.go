@@ -62,11 +62,12 @@ type NvIpamSubnetConfig struct {
 }
 
 type SriovConfig struct {
-	Mtu          int    `yaml:"mtu"`
-	NumVfs       int    `yaml:"numVfs"`
-	Priority     int    `yaml:"priority"`
-	ResourceName string `yaml:"resourceName"`
-	NetworkName  string `yaml:"networkName"`
+	EthernetMtu   int    `yaml:"ethernetMtu"`
+	InfinibandMtu int    `yaml:"infinibandMtu"`
+	NumVfs        int    `yaml:"numVfs"`
+	Priority      int    `yaml:"priority"`
+	ResourceName  string `yaml:"resourceName"`
+	NetworkName   string `yaml:"networkName"`
 }
 
 type HostdevConfig struct {

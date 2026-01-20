@@ -10,7 +10,7 @@ spec:
   networkNamespace: "default"
   master: "{{$pf.NetworkInterface}}"
   mode: "bridge"
-  mtu: {{$.Sriov.Mtu}}
+  mtu: {{$.Sriov.EthernetMtu}}
   ipam: |
     {
       "type": "nv-ipam",
@@ -29,7 +29,7 @@ spec:
   networkNamespace: "default"
   master: "{{(index .ClusterConfig.PFs 0).NetworkInterface}}"
   mode: "bridge"
-  mtu: {{.Sriov.Mtu}}
+  mtu: {{.Sriov.EthernetMtu}}
   ipam: |
     {
       "type": "nv-ipam",

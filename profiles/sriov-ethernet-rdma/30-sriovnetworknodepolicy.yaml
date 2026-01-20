@@ -9,7 +9,7 @@ metadata:
   namespace: {{$.NetworkOperator.Namespace}}
 spec:
   deviceType: netdevice
-  mtu: {{$.Sriov.Mtu}}
+  mtu: {{$.Sriov.EthernetMtu}}
   {{- if $.ClusterConfig.NodeSelector }}
   nodeSelector:
     {{- range $key, $value := $.ClusterConfig.NodeSelector }}
@@ -36,7 +36,7 @@ metadata:
   namespace: {{.NetworkOperator.Namespace}}
 spec:
   deviceType: netdevice
-  mtu: {{.Sriov.Mtu}}
+  mtu: {{.Sriov.EthernetMtu}}
   {{- if $.ClusterConfig.NodeSelector }}
   nodeSelector:
     {{- range $key, $value := $.ClusterConfig.NodeSelector }}
