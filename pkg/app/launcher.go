@@ -17,15 +17,16 @@
 package app
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"context"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
 	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
@@ -114,7 +115,7 @@ func (l *Launcher) executeWorkflow() error {
 		}
 	}
 
-	if !profilesConfiguredInCmd && l.options.Prompt == "" {
+	if !profilesConfiguredInCmd && l.options.Prompt == "" && !l.options.LLMInteractive {
 		l.logger.Info("Profiles are not configured for every plugin, skipping deployment files generation")
 		return nil
 	}
@@ -133,10 +134,31 @@ func (l *Launcher) executeWorkflow() error {
 					return fmt.Errorf("failed to build profile for plugin %s: %w", plugin.GetName(), err)
 				}
 			}
+		} else if l.options.LLMInteractive {
+			l.logger.Info("Starting interactive LLM session")
+
+			prompt, err := l.runInteractiveSession(fullConfig.ClusterConfig)
+			if err != nil {
+				return fmt.Errorf("interactive session failed: %w", err)
+			}
+
+			for _, plugin := range l.plugins {
+				if err := plugin.BuildProfileFromLLMResponse(prompt, fullConfig.Profile); err != nil {
+					return fmt.Errorf("failed to build profile for plugin %s: %w", plugin.GetName(), err)
+				}
+			}
+
+			l.logger.Info("Selected options",
+				"fabric", fullConfig.Profile.Fabric,
+				"deployment", fullConfig.Profile.Deployment,
+				"multirail", fullConfig.Profile.Multirail,
+				"spectrumX", fullConfig.Profile.SpectrumX,
+				"ai", fullConfig.Profile.Ai,
+				"reasoning", prompt["reasoning"])
 		} else if l.options.Prompt != "" {
 			l.logger.Info("Selecting a profile using LLM-assisted prompt")
 
-			prompt, err := llm.SelectPrompt(l.options.Prompt, *fullConfig.ClusterConfig, l.options.LLMApiKey, l.options.LLMApiUrl, l.options.LLMVendor)
+			prompt, err := llm.SelectPromptWithModel(l.options.Prompt, *fullConfig.ClusterConfig, l.options.LLMApiKey, l.options.LLMApiUrl, l.options.LLMVendor, l.options.LLMModel)
 			if err != nil {
 				return fmt.Errorf("failed to select prompt: %w", err)
 			}
@@ -328,4 +350,74 @@ func (l *Launcher) deployConfigurationProfile(profile *profiles.Profile) error {
 
 	l.logger.Info("Deployment profile applied successfully", "profile", profile.Name)
 	return nil
+}
+
+// runInteractiveSession runs an interactive chat session with the LLM
+func (l *Launcher) runInteractiveSession(clusterConfig *config.ClusterConfig) (map[string]string, error) {
+	session, err := llm.NewChatSession(*clusterConfig, l.options.LLMApiKey, l.options.LLMApiUrl, l.options.LLMVendor, l.options.LLMModel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create chat session: %w", err)
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("\n=== Interactive LLM Session ===")
+	fmt.Println("Ask questions about network configuration or describe your requirements.")
+	fmt.Println("Type 'generate' to generate manifests based on the recommended profile.")
+	fmt.Println("Type 'exit' or 'quit' to cancel.")
+	fmt.Println("================================\n")
+
+	for {
+		fmt.Print("You: ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read input: %w", err)
+		}
+
+		input = strings.TrimSpace(input)
+
+		// Check for exit commands
+		if strings.EqualFold(input, "exit") || strings.EqualFold(input, "quit") {
+			return nil, fmt.Errorf("session cancelled by user")
+		}
+
+		// Check for generate command
+		if strings.EqualFold(input, "generate") {
+			fmt.Println("\nExtracting profile from last response...")
+			profile, err := session.ExtractProfile()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				fmt.Println("Please ask a question first to get a profile recommendation.")
+				continue
+			}
+
+			confidence := profile["confidence"]
+			if confidence == "low" {
+				fmt.Printf("\nWarning: The LLM has low confidence in this recommendation.\n")
+				fmt.Printf("Reason: %s\n", profile["reasoning"])
+				fmt.Print("Do you want to proceed anyway? (yes/no): ")
+
+				confirm, _ := reader.ReadString('\n')
+				confirm = strings.TrimSpace(strings.ToLower(confirm))
+				if confirm != "yes" && confirm != "y" {
+					fmt.Println("Cancelled. Ask another question or refine your requirements.")
+					continue
+				}
+			}
+
+			fmt.Println("\nProceeding with profile generation...")
+			return profile, nil
+		}
+
+		// Send message to LLM
+		response, err := session.SendMessage(context.Background(), input)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("\nAssistant: %s", response)
+		fmt.Println(llm.InteractivePromptSuffix)
+		fmt.Println()
+	}
 }

@@ -42,6 +42,8 @@ var (
 	llmApiKey             string
 	llmApiUrl             string
 	llmVendor             string
+	llmModel              string
+	llmInteractive        bool
 	saveDeploymentFiles   string
 	deploy                bool
 	kubeconfig            string
@@ -95,6 +97,8 @@ Apply the generated deployment files to your Kubernetes cluster by using --deplo
 			LLMApiKey:             llmApiKey,
 			LLMApiUrl:             llmApiUrl,
 			LLMVendor:             llmVendor,
+			LLMModel:              llmModel,
+			LLMInteractive:        llmInteractive,
 		}
 
 		// Validate CLI configuration
@@ -143,8 +147,10 @@ func init() {
 	rootCmd.Flags().BoolVar(&ai, "ai", false, "Enable AI deployment")
 	rootCmd.Flags().StringVar(&prompt, "prompt", "", "Path to file with a prompt to use for LLM-assisted profile generation")
 	rootCmd.Flags().StringVar(&llmApiKey, "llm-api-key", "", "API key for the LLM API (required when using --prompt)")
-	rootCmd.Flags().StringVar(&llmApiUrl, "llm-api-url", "", "API URL for the LLM API (required when using --prompt)")
-	rootCmd.Flags().StringVar(&llmVendor, "llm-vendor", "openai-azure", "Vendor of the LLM API (required when using --prompt)")
+	rootCmd.Flags().StringVar(&llmApiUrl, "llm-api-url", "", "API URL for the LLM API")
+	rootCmd.Flags().StringVar(&llmVendor, "llm-vendor", "openai-azure", "Vendor of the LLM API: openai, openai-azure, anthropic, gemini")
+	rootCmd.Flags().StringVar(&llmModel, "llm-model", "", "Model name for the LLM API (e.g., claude-3-5-sonnet-20241022, gpt-4)")
+	rootCmd.Flags().BoolVar(&llmInteractive, "llm-interactive", false, "Enable interactive chat mode for LLM-assisted profile selection")
 	rootCmd.Flags().StringVar(&saveDeploymentFiles, "save-deployment-files", "/opt/nvidia/k8s-launch-kit/deployment", "Save generated deployment files to the specified directory")
 
 	// Phase 3: Cluster deployment flags
@@ -184,17 +190,21 @@ func validateConfig(options options.Options) error {
 	// Network Operator plugin rules
 	if slices.Contains(options.EnabledPlugins, networkoperatorplugin.PluginName) {
 		// If profile is selected, either save-deployment-files or deploy options should be provided
-		if (options.Fabric != "" || options.DeploymentType != "" || options.Prompt != "") && options.SaveDeploymentFiles == "" && !options.Deploy {
-			return fmt.Errorf("when --deployment-type or --prompt is specified, either --save-deployment-files or --deploy must be provided")
+		if (options.Fabric != "" || options.DeploymentType != "" || options.Prompt != "" || options.LLMInteractive) && options.SaveDeploymentFiles == "" && !options.Deploy {
+			return fmt.Errorf("when --deployment-type, --prompt, or --llm-interactive is specified, either --save-deployment-files or --deploy must be provided")
 		}
 
 		// Save-deployment-files or deploy can't work without profile
-		if options.Fabric == "" && options.DeploymentType == "" && options.Prompt == "" && options.Deploy {
-			return fmt.Errorf("--deploy requires --deployment-type or --prompt to be specified")
+		if options.Fabric == "" && options.DeploymentType == "" && options.Prompt == "" && !options.LLMInteractive && options.Deploy {
+			return fmt.Errorf("--deploy requires --deployment-type, --prompt, or --llm-interactive to be specified")
 		}
 
-		if options.Prompt != "" && (options.Fabric != "" || options.DeploymentType != "") {
-			return fmt.Errorf("--fabric and --prompt cannot be used together")
+		if (options.Prompt != "" || options.LLMInteractive) && (options.Fabric != "" || options.DeploymentType != "") {
+			return fmt.Errorf("--fabric and --prompt/--llm-interactive cannot be used together")
+		}
+
+		if options.Prompt != "" && options.LLMInteractive {
+			return fmt.Errorf("--prompt and --llm-interactive cannot be used together")
 		}
 
 		if (options.DeploymentType != "" && options.Fabric == "") || (options.Fabric != "" && options.DeploymentType == "") {
@@ -210,13 +220,14 @@ func validateConfig(options options.Options) error {
 		}
 	}
 
-	if options.Prompt != "" {
+	// LLM options validation
+	if options.Prompt != "" || options.LLMInteractive {
 		if options.LLMApiKey == "" || options.LLMVendor == "" {
-			return fmt.Errorf("--prompt requires --llm-api-key and --llm-vendor to be specified")
+			return fmt.Errorf("--prompt or --llm-interactive requires --llm-api-key and --llm-vendor to be specified")
 		}
 
-		if !slices.Contains([]string{"openai-azure"}, options.LLMVendor) {
-			return fmt.Errorf("--llm-vendor must be one of: openai-azure")
+		if !slices.Contains([]string{"openai", "openai-azure", "anthropic", "gemini"}, options.LLMVendor) {
+			return fmt.Errorf("--llm-vendor must be one of: openai, openai-azure, anthropic, gemini")
 		}
 	}
 

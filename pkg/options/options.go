@@ -35,9 +35,11 @@ type Options struct {
 	Prompt              string // Path to file with a prompt to use for LLM-assisted profile generation
 	SaveDeploymentFiles string // Directory to save generated files
 
-	LLMApiKey string // API key for the LLM API
-	LLMApiUrl string // API URL for the LLM API
-	LLMVendor string // Vendor of the LLM API
+	LLMApiKey      string // API key for the LLM API
+	LLMApiUrl      string // API URL for the LLM API
+	LLMVendor      string // Vendor of the LLM API
+	LLMModel       string // Model name for the LLM API
+	LLMInteractive bool   // Enable interactive chat mode
 
 	EnabledPlugins []string // Enabled plugins
 
