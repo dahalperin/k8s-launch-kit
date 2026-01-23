@@ -33,6 +33,7 @@ import (
 
 var (
 	logLevel              string
+	logFile               string
 	fabric                string
 	deploymentType        string
 	multirail             bool
@@ -81,6 +82,7 @@ Apply the generated deployment files to your Kubernetes cluster by using --deplo
 		// Create application options from CLI flags
 		options := options.Options{
 			LogLevel:              logLevel,
+			LogFile:               logFile,
 			UserConfig:            userConfig,
 			DiscoverClusterConfig: discoverClusterConfig,
 			Fabric:                fabric,
@@ -156,8 +158,10 @@ func init() {
 	// Phase 3: Cluster deployment flags
 	rootCmd.Flags().BoolVar(&deploy, "deploy", false, "Deploy the generated files to the Kubernetes cluster")
 	rootCmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file for cluster deployment (required when using --deploy)")
-	// Log level flag
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+
+	// Logging flags
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Enable logging at specified level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Write logs to file instead of stderr")
 }
 
 // validateConfig validates the CLI flag combinations
@@ -240,8 +244,35 @@ func parseEnabledPlugins(enabledPlugins string) []string {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+	// Detect if --log-level was explicitly set
+	logLevelFlag := rootCmd.PersistentFlags().Lookup("log-level")
+	loggingEnabled := logLevelFlag.Changed
+
+	if loggingEnabled {
+		applog.SetLoggingEnabled(true)
+		if logLevel == "" {
+			logLevel = "info" // default when enabled
+		}
+	} else {
+		applog.SetLoggingEnabled(false)
+	}
+
+	// Configure log file if specified
+	if logFile != "" {
+		if err := applog.SetLogFile(logFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to open log file: %v\n", err)
+		}
+	}
+
 	// Initialize logging
 	applog.InitLog()
+
+	// Set log level if logging is enabled
+	if loggingEnabled && logLevel != "" {
+		if err := applog.SetLogLevel(logLevel); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid log level %q: %v\n", logLevel, err)
+		}
+	}
 
 	// Implementation for config initialization
 	// This can be expanded later to read from config files

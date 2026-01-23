@@ -26,6 +26,7 @@ import (
 	netop "github.com/Mellanox/network-operator/api/v1alpha1"
 	nicop "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
+	"github.com/nvidia/k8s-launch-kit/pkg/ui"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,8 @@ import (
 )
 
 func (p *NetworkOperatorPlugin) DiscoverClusterConfig(ctx context.Context, c client.Client, defaultConfig *config.LaunchKubernetesConfig) error {
+	uiOutput := ui.FromContext(ctx)
+
 	// Ensure a NicClusterPolicy exists (error if any already exists, else create one)
 	policy := &netop.NicClusterPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -55,6 +58,7 @@ func (p *NetworkOperatorPlugin) DiscoverClusterConfig(ctx context.Context, c cli
 		},
 	}
 
+	uiOutput.Info("Deploying discovery profile")
 	log.Log.Info("Deploying a thin NicClusterPolicy for cluster config discovery")
 
 	if err := EnsureNicClusterPolicy(ctx, c, policy); err != nil {
@@ -140,6 +144,9 @@ func isPodReady(pod *corev1.Pod) bool {
 
 // waitNicDevicesDiscovered polls until one or more NicDevice objects exist in the given namespace.
 func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namespace string) error {
+	uiOutput := ui.FromContext(parentCtx)
+	progress := uiOutput.StartProgress("Discovering network devices (timeout: 5 min)")
+
 	// Use a bounded timeout if none supplied
 	ctx := parentCtx
 	if _, hasDeadline := parentCtx.Deadline(); !hasDeadline {
@@ -155,15 +162,17 @@ func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namesp
 		list := &nicop.NicDeviceList{}
 		if err := c.List(ctx, list, client.InNamespace(namespace)); err == nil {
 			if len(list.Items) > 0 {
+				progress.Success(fmt.Sprintf("Found %d device(s)", len(list.Items)))
 				return nil
 			}
 		}
 
 		select {
 		case <-ctx.Done():
+			progress.Fail("Timeout waiting for devices")
 			return fmt.Errorf("timeout waiting for NicDevice resources in namespace %q", namespace)
 		case <-ticker.C:
-			// continue polling
+			progress.Update("Still waiting for device discovery...")
 		}
 	}
 }
