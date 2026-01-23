@@ -20,6 +20,7 @@ package options
 type Options struct {
 	// Logging
 	LogLevel string
+	LogFile  string // Path to log file (optional)
 
 	// Phase 1: Cluster Discovery
 	UserConfig            string // Path to user-provided config (skips discovery)

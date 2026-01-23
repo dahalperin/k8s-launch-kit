@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
+	"github.com/nvidia/k8s-launch-kit/pkg/ui"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +41,8 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	uiOutput := ui.FromContext(ctx)
 
 	// List files in directory (non-recursive) and sort
 	entries, err := os.ReadDir(manifestsDir)
@@ -86,9 +89,11 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 
 	// Apply NicClusterPolicy first if present
 	if len(nicDoc) != 0 {
+		progress := uiOutput.StartProgress("Applying NIC Cluster Policy")
 		log.Log.Info("Applying NicClusterPolicy for selected profile")
 		obj := &unstructured.Unstructured{}
 		if err := yaml.Unmarshal(nicDoc, obj); err != nil {
+			progress.Fail("Failed to decode manifest")
 			return fmt.Errorf("failed to decode NicClusterPolicy: %w", err)
 		}
 		// Ensure GVK set for server-side apply
@@ -100,9 +105,11 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 			}
 		}
 		if err := applyUnstructured(ctx, kubeClient, obj); err != nil {
+			progress.Fail("Failed to apply policy")
 			return err
 		}
 
+		progress.Success("NIC Cluster Policy applied")
 		log.Log.Info("Waiting for NicClusterPolicy to be ready")
 		if err := WaitNicClusterPolicyReady(ctx, kubeClient, obj.GetName()); err != nil {
 			return err
@@ -110,10 +117,14 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 	}
 
 	// Apply remaining manifests
+	if len(otherDocs) > 0 {
+		uiOutput.Info("Applying %d additional manifest(s)", len(otherDocs))
+	}
 	log.Log.Info("Applying remaining profile manifests", "count", len(otherDocs))
-	for _, b := range otherDocs {
+	for i, b := range otherDocs {
 		obj := &unstructured.Unstructured{}
 		if err := yaml.Unmarshal(b, obj); err != nil {
+			uiOutput.Error("Failed to decode manifest: %v", err)
 			return fmt.Errorf("failed to decode manifest: %w", err)
 		}
 		// Ensure GVK set for server-side apply
@@ -124,6 +135,7 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 				obj.SetGroupVersionKind(gv.WithKind(kind))
 			}
 		}
+		uiOutput.Info("  [%d/%d] Applying %s/%s", i+1, len(otherDocs), obj.GetKind(), obj.GetName())
 		log.Log.Info("Applying object", "kind", obj.GetKind(), "name", obj.GetName(), "version", obj.GetAPIVersion())
 
 		// Apply with retry for Pod kind
@@ -131,12 +143,14 @@ func (p *NetworkOperatorPlugin) DeployProfile(ctx context.Context, profile *prof
 		if applyErr != nil && strings.EqualFold(obj.GetKind(), "Pod") {
 			const maxAttempts = 3
 			for attempt := 2; attempt <= maxAttempts && applyErr != nil; attempt++ {
+				uiOutput.Warning("    Retrying (%d/%d)...", attempt, maxAttempts)
 				log.Log.Info("Pod apply failed, retrying", "name", obj.GetName(), "attempt", attempt, "delay", "30s", "error", applyErr.Error())
 				time.Sleep(30 * time.Second)
 				applyErr = applyUnstructured(ctx, kubeClient, obj)
 			}
 		}
 		if applyErr != nil {
+			uiOutput.Error("    Failed: %v", applyErr)
 			return applyErr
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	netop "github.com/Mellanox/network-operator/api/v1alpha1"
+	"github.com/nvidia/k8s-launch-kit/pkg/ui"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,6 +49,9 @@ func EnsureNicClusterPolicy(ctx context.Context, c client.Client, policy *netop.
 
 // WaitNicClusterPolicyReady polls NicClusterPolicy until Status.State is ready or error, with a timeout.
 func WaitNicClusterPolicyReady(parentCtx context.Context, c client.Client, name string) error {
+	uiOutput := ui.FromContext(parentCtx)
+	progress := uiOutput.StartProgress("Waiting for NIC Cluster Policy to become ready")
+
 	// Use a bounded timeout if none supplied
 	ctx := parentCtx
 	if _, hasDeadline := parentCtx.Deadline(); !hasDeadline {
@@ -65,15 +69,22 @@ func WaitNicClusterPolicyReady(parentCtx context.Context, c client.Client, name 
 		if err := c.Get(ctx, client.ObjectKey{Name: name}, policy); err == nil {
 			switch policy.Status.State {
 			case netop.StateReady:
+				progress.Success("NIC Cluster Policy is ready")
 				log.Log.Info("NicClusterPolicy is ready")
 				return nil
 			case netop.StateError:
+				progress.Fail(fmt.Sprintf("Policy error: %s", policy.Status.Reason))
 				return fmt.Errorf("NicClusterPolicy in error state: %s", policy.Status.Reason)
+			default:
+				if policy.Status.State != "" {
+					progress.Update(fmt.Sprintf("Current state: %s", policy.Status.State))
+				}
 			}
 		}
 
 		select {
 		case <-ctx.Done():
+			progress.Fail("Timeout waiting for policy")
 			return fmt.Errorf("timeout waiting for NicClusterPolicy %q to become ready", name)
 		case <-ticker.C:
 			// continue

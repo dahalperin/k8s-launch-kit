@@ -52,3 +52,10 @@ Thumbs.db
 # Build artifacts
 build/
 dist/
+
+claude.md
+licenses.csv
+licenses_raw.csv
+modules.csv
+licenses.sh
+third_party_licenses/

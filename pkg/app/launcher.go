@@ -36,6 +36,7 @@ import (
 	"github.com/nvidia/k8s-launch-kit/pkg/options"
 	"github.com/nvidia/k8s-launch-kit/pkg/plugin"
 	"github.com/nvidia/k8s-launch-kit/pkg/profiles"
+	"github.com/nvidia/k8s-launch-kit/pkg/ui"
 	"gopkg.in/yaml.v2"
 )
 
@@ -45,6 +46,7 @@ type Launcher struct {
 	logger     logr.Logger
 	plugins    map[string]plugin.Plugin
 	kubeClient client.Client
+	ui         ui.Output
 }
 
 // New creates a new Launcher instance with the given options
@@ -53,6 +55,7 @@ func New(options options.Options) *Launcher {
 		options: options,
 		logger:  log.Log,
 		plugins: make(map[string]plugin.Plugin),
+		ui:      ui.New(),
 	}
 
 	return l
@@ -94,11 +97,14 @@ func (l *Launcher) Run() error {
 
 // executeWorkflow executes the main 3-phase workflow
 func (l *Launcher) executeWorkflow() error {
+	l.ui.Header("NVIDIA Kubernetes Launch Kit")
 	l.logger.Info("Starting l8k workflow")
 
 	configPath := ""
 	if l.options.DiscoverClusterConfig {
+		l.ui.Section("Phase 1: Cluster Discovery")
 		if err := l.discoverClusterConfig(); err != nil {
+			l.ui.Error("Cluster discovery failed: %v", err)
 			return fmt.Errorf("cluster discovery failed: %w", err)
 		}
 
@@ -116,6 +122,7 @@ func (l *Launcher) executeWorkflow() error {
 	}
 
 	if !profilesConfiguredInCmd && l.options.Prompt == "" && !l.options.LLMInteractive {
+		l.ui.Info("Profiles not configured, skipping deployment file generation")
 		l.logger.Info("Profiles are not configured for every plugin, skipping deployment files generation")
 		return nil
 	}
@@ -135,10 +142,12 @@ func (l *Launcher) executeWorkflow() error {
 				}
 			}
 		} else if l.options.LLMInteractive {
+			l.ui.Section("Profile Selection (AI-Assisted)")
 			l.logger.Info("Starting interactive LLM session")
 
 			prompt, err := l.runInteractiveSession(fullConfig.ClusterConfig)
 			if err != nil {
+				l.ui.Error("Interactive session failed: %v", err)
 				return fmt.Errorf("interactive session failed: %w", err)
 			}
 
@@ -148,6 +157,10 @@ func (l *Launcher) executeWorkflow() error {
 				}
 			}
 
+			l.ui.Success("Profile selected")
+			l.ui.Info("  Fabric: %s", fullConfig.Profile.Fabric)
+			l.ui.Info("  Deployment: %s", fullConfig.Profile.Deployment)
+			l.ui.Info("  Multirail: %v", fullConfig.Profile.Multirail)
 			l.logger.Info("Selected options",
 				"fabric", fullConfig.Profile.Fabric,
 				"deployment", fullConfig.Profile.Deployment,
@@ -156,23 +169,36 @@ func (l *Launcher) executeWorkflow() error {
 				"ai", fullConfig.Profile.Ai,
 				"reasoning", prompt["reasoning"])
 		} else if l.options.Prompt != "" {
+			l.ui.Section("Profile Selection (AI-Assisted)")
+			l.ui.Info("Analyzing requirements with AI")
+			progress := l.ui.StartProgress("Waiting for AI recommendation")
+
 			l.logger.Info("Selecting a profile using LLM-assisted prompt")
 
 			prompt, err := llm.SelectPromptWithModel(l.options.Prompt, *fullConfig.ClusterConfig, l.options.LLMApiKey, l.options.LLMApiUrl, l.options.LLMVendor, l.options.LLMModel)
 			if err != nil {
+				progress.Fail("AI selection failed")
+				l.ui.Error("Failed to get AI recommendation: %v", err)
 				return fmt.Errorf("failed to select prompt: %w", err)
 			}
 			confidence := prompt["confidence"]
 			if confidence == "low" {
+				progress.Fail("Low confidence recommendation")
+				l.ui.Warning("AI has low confidence: %s", prompt["reasoning"])
 				return fmt.Errorf("couldn't select a deployment profile based on the user prompt. Try again with a different prompt or use the cli flags (--fabric, --deployment-type, --multirail) to select the profile manually. Reason: %s", prompt["reasoning"])
 			}
 
 			for _, plugin := range l.plugins {
 				if err := plugin.BuildProfileFromLLMResponse(prompt, fullConfig.Profile); err != nil {
+					progress.Fail("Profile building failed")
 					return fmt.Errorf("failed to build profile for plugin %s: %w", plugin.GetName(), err)
 				}
 			}
 
+			progress.Success("Profile selected")
+			l.ui.Info("  Fabric: %s", fullConfig.Profile.Fabric)
+			l.ui.Info("  Deployment: %s", fullConfig.Profile.Deployment)
+			l.ui.Info("  Multirail: %v", fullConfig.Profile.Multirail)
 			l.logger.Info("Selected options",
 				"fabric", fullConfig.Profile.Fabric,
 				"deployment", fullConfig.Profile.Deployment,
@@ -189,29 +215,36 @@ func (l *Launcher) executeWorkflow() error {
 	for pluginName, plugin := range l.plugins {
 		profile, err := profiles.FindApplicableProfile(fullConfig.Profile, fullConfig.ClusterConfig.Capabilities, pluginName)
 		if err != nil {
+			l.ui.Error("Failed to find profile: %v", err)
 			l.logger.Error(err, "Failed to find applicable profile for the plugin", "plugin", plugin.GetName(), "cluster capabilities", fullConfig.ClusterConfig.Capabilities, "profile requirements", fullConfig.Profile)
 			return err
 		}
 		foundProfiles = append(foundProfiles, *profile)
 	}
 
+	l.ui.Section("Deployment File Generation")
 	for _, profile := range foundProfiles {
+		l.ui.Info("Generating files for profile: %s", profile.Name)
 		l.logger.Info("Generating deployment files for profile", "profile", profile.Name)
 
 		if err := l.generateDeploymentFiles(&profile, fullConfig); err != nil {
+			l.ui.Error("File generation failed: %v", err)
 			return fmt.Errorf("deployment files generation failed: %w", err)
 		}
 	}
 
 	// Phase 3: Cluster Deployment
 	if l.options.Deploy {
+		l.ui.Section("Cluster Deployment")
 		for _, profile := range foundProfiles {
 			if err := l.deployConfigurationProfile(&profile); err != nil {
+				l.ui.Error("Deployment failed: %v", err)
 				return fmt.Errorf("deployment failed: %w", err)
 			}
 		}
 	}
 
+	l.ui.Success("Workflow completed successfully")
 	l.logger.Info("l8k workflow completed successfully")
 	return nil
 }
@@ -219,11 +252,13 @@ func (l *Launcher) executeWorkflow() error {
 // discoverClusterConfig handles cluster configuration discovery
 func (l *Launcher) discoverClusterConfig() error {
 	if l.options.UserConfig != "" {
+		l.ui.Info("Using provided configuration: %s", l.options.UserConfig)
 		l.logger.Info("Using provided user config", "path", l.options.UserConfig)
 		// TODO: Validate and load user config file
 		return nil
 	}
 
+	l.ui.Info("Discovering cluster capabilities")
 	l.logger.Info("Discovering cluster configuration")
 
 	// Load defaults from l8k-config.yaml (temporary default path)
@@ -243,9 +278,11 @@ func (l *Launcher) discoverClusterConfig() error {
 	}
 	defaults.Profile = nil
 
+	ctx := ui.WithOutput(context.Background(), l.ui)
 	for _, plugin := range l.plugins {
-		err := plugin.DiscoverClusterConfig(context.Background(), l.kubeClient, defaults)
+		err := plugin.DiscoverClusterConfig(ctx, l.kubeClient, defaults)
 		if err != nil {
+			l.ui.Error("Discovery failed: %v", err)
 			return fmt.Errorf("failed to discover cluster config: %w", err)
 		}
 	}
@@ -266,9 +303,11 @@ func (l *Launcher) discoverClusterConfig() error {
 		return fmt.Errorf("failed to create output directory %s: %w", filepath.Dir(l.options.SaveClusterConfig), err)
 	}
 	if err := os.WriteFile(l.options.SaveClusterConfig, data, 0644); err != nil {
+		l.ui.Error("Failed to save configuration: %v", err)
 		return fmt.Errorf("failed to write discovered config to %s: %w", l.options.SaveClusterConfig, err)
 	}
 
+	l.ui.Success("Configuration saved: %s", l.options.SaveClusterConfig)
 	l.logger.Info("Discovered cluster config saved", "path", l.options.SaveClusterConfig)
 	return nil
 }
@@ -313,12 +352,14 @@ func (l *Launcher) saveDeploymentFiles(renderedFiles map[string]string, outputDi
 		outputPath := fmt.Sprintf("%s/%s", outputDir, filename)
 
 		if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+			l.ui.Error("Failed to write file %s: %v", outputPath, err)
 			return fmt.Errorf("failed to write file %s: %w", outputPath, err)
 		}
 
 		l.logger.Info("Saved deployment file", "file", outputPath)
 	}
 
+	l.ui.Success("Saved %d file(s) to: %s", len(renderedFiles), outputDir)
 	l.logger.Info("All deployment files saved successfully",
 		"directory", outputDir,
 		"fileCount", len(renderedFiles))
@@ -333,21 +374,27 @@ func (l *Launcher) deployConfigurationProfile(profile *profiles.Profile) error {
 		return nil
 	}
 
+	l.ui.Info("Deploying profile: %s", profile.Name)
 	l.logger.Info("Deploying profile to cluster", "profile", profile.Name, "kubeconfig", l.options.Kubeconfig)
 
 	if l.options.SaveDeploymentFiles == "" {
+		l.ui.Error("Deployment requires generated files (use --save-deployment-files)")
 		return fmt.Errorf("--deploy requires generated files directory; provide --save-deployment-files")
 	}
 
 	plugin, ok := l.plugins[profile.Plugin]
 	if !ok {
+		l.ui.Error("Plugin not found: %s", profile.Plugin)
 		return fmt.Errorf("plugin %s not found", profile.Plugin)
 	}
 
-	if err := plugin.DeployProfile(context.Background(), profile, l.kubeClient, filepath.Join(l.options.SaveDeploymentFiles, profile.Plugin)); err != nil {
+	ctx := ui.WithOutput(context.Background(), l.ui)
+	if err := plugin.DeployProfile(ctx, profile, l.kubeClient, filepath.Join(l.options.SaveDeploymentFiles, profile.Plugin)); err != nil {
+		l.ui.Error("Deployment failed: %v", err)
 		return fmt.Errorf("failed to deploy profile: %w", err)
 	}
 
+	l.ui.Success("Profile deployed: %s", profile.Name)
 	l.logger.Info("Deployment profile applied successfully", "profile", profile.Name)
 	return nil
 }
@@ -410,11 +457,14 @@ func (l *Launcher) runInteractiveSession(clusterConfig *config.ClusterConfig) (m
 		}
 
 		// Send message to LLM
+		progress := l.ui.StartProgress("Waiting for AI response")
 		response, err := session.SendMessage(context.Background(), input)
 		if err != nil {
+			progress.Fail("AI request failed")
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
+		progress.Success("Response received")
 
 		fmt.Printf("\nAssistant: %s", response)
 		fmt.Println(llm.InteractivePromptSuffix)

@@ -18,7 +18,9 @@ package log
 
 import (
 	"flag"
+	"os"
 
+	"github.com/go-logr/zapr"
 	zzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -27,6 +29,12 @@ import (
 
 const (
 	DebugLevel = int(zapcore.DebugLevel)
+)
+
+var (
+	logFile        *os.File
+	logFileSet     bool
+	loggingEnabled bool
 )
 
 // Options stores controller-runtime (zap) log config
@@ -47,11 +55,81 @@ func BindFlags(fs *flag.FlagSet) {
 	Options.BindFlags(fs)
 }
 
+// SetLogFile configures logging to write to a file
+func SetLogFile(path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	logFile = file
+	logFileSet = true
+	return nil
+}
+
+// SetLoggingEnabled controls whether logging is enabled or disabled
+func SetLoggingEnabled(enabled bool) {
+	loggingEnabled = enabled
+}
+
+// IsEnabled returns whether logging is currently enabled
+func IsEnabled() bool {
+	return loggingEnabled
+}
+
 // InitLog initializes controller-runtime log (zap log)
 // this should be called once Options have been initialized
 // either by parsing flags or directly modifying Options.
 func InitLog() {
-	log.SetLogger(zap.New(zap.UseFlagOptions(Options)))
+	if !loggingEnabled {
+		// Disable logging by setting level to panic (effectively disables all logs)
+		Options.Level = zzap.NewAtomicLevelAt(zapcore.PanicLevel)
+		log.SetLogger(zap.New(zap.UseFlagOptions(Options)))
+		return
+	}
+
+	if logFileSet {
+		// Configure file output
+		encoder := zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+			TimeKey:        "time",
+			LevelKey:       "level",
+			NameKey:        "logger",
+			CallerKey:      "caller",
+			MessageKey:     "msg",
+			StacktraceKey:  "stacktrace",
+			LineEnding:     zapcore.DefaultLineEnding,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeTime:     zapcore.RFC3339NanoTimeEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		})
+
+		writeSyncer := zapcore.AddSync(logFile)
+		core := zapcore.NewCore(encoder, writeSyncer, Options.Level)
+		logger := zzap.New(core, zzap.AddCaller(), zzap.AddStacktrace(zapcore.DPanicLevel))
+		log.SetLogger(zapr.NewLogger(logger))
+		return
+	}
+
+	// Log to stderr (keep stdout clean)
+	// Configure stderr output by creating a custom zap core
+	encoder := zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+		TimeKey:        "time",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeTime:     zapcore.RFC3339NanoTimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	})
+
+	writeSyncer := zapcore.AddSync(os.Stderr)
+	core := zapcore.NewCore(encoder, writeSyncer, Options.Level)
+	logger := zzap.New(core, zzap.AddCaller(), zzap.AddStacktrace(zapcore.DPanicLevel))
+	log.SetLogger(zapr.NewLogger(logger))
 }
 
 // SetLogLevel sets current logging level to the provided lvl
